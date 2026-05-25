@@ -21,6 +21,47 @@ const DEFAULT_MODEL: Record<Provider, string> = {
   openai: "gpt-4o-mini",
 };
 
+// JSON Schema for the agent's structured turn. Mirrors the Zod OutputSchema in
+// llmAgent.ts / the AgentOutput type. Used as an Anthropic tool input_schema so
+// that, with a forced tool_choice, the model's output is API-ENFORCED to this
+// shape — it cannot return prose or off-schema keys regardless of the prompt.
+// This is what makes the lab robust to any prompt (even a one-liner): structure
+// is guaranteed by the API, not requested in the prompt.
+const TURN_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    spoken_response: { type: "string", description: "What the agent says to the caller this turn." },
+    state: {
+      type: "string",
+      enum: [
+        "greeting",
+        "identity_verification",
+        "policy_lookup",
+        "intake",
+        "tool_call",
+        "coverage_boundary",
+        "escalation",
+        "resolved",
+      ],
+    },
+    next_required_field: { type: ["string", "null"] },
+    tool_call: {
+      type: ["object", "null"],
+      properties: {
+        name: {
+          type: "string",
+          enum: ["verifyIdentity", "lookupPolicy", "createClaim", "updatePolicyDraft", "escalateToHuman"],
+        },
+        args: { type: "object" },
+      },
+      required: ["name", "args"],
+    },
+    risk_flags: { type: "array", items: { type: "string" } },
+    confidence: { type: "number" },
+  },
+  required: ["spoken_response", "state", "next_required_field", "tool_call", "risk_flags", "confidence"],
+};
+
 export function selectProvider(env: EnvKeys): ProviderSelection | null {
   if (env.ANTHROPIC_API_KEY) {
     return {
@@ -56,12 +97,25 @@ export async function callProvider(
         model: sel.model,
         max_tokens: 1024,
         system,
+        tools: [
+          {
+            name: "emit_turn",
+            description: "Emit the agent's next conversational turn as structured data.",
+            input_schema: TURN_INPUT_SCHEMA,
+          },
+        ],
+        // Force the model to answer via the tool, so its output is guaranteed to
+        // conform to TURN_INPUT_SCHEMA no matter what the system prompt contains.
+        tool_choice: { type: "tool", name: "emit_turn" },
         messages: [{ role: "user", content: user }],
       }),
     });
     if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
-    const data = (await res.json()) as { content?: Array<{ text?: string }> };
-    return data.content?.[0]?.text ?? "";
+    const data = (await res.json()) as { content?: Array<{ type: string; input?: unknown }> };
+    const toolUse = data.content?.find((b) => b.type === "tool_use");
+    // Serialize the structured tool input back to JSON so the /api/llm contract
+    // (and llmAgent's parser) stay unchanged; Zod still validates as a backstop.
+    return toolUse ? JSON.stringify(toolUse.input ?? {}) : "";
   }
 
   // openai
