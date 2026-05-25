@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import type { LabView, Turn } from "@/lab/types";
 import { StateBadge, RiskBadge, NeutralBadge } from "./StatusBadge";
-import { Mic, User, ArrowRight, Play, Loader2, RotateCcw } from "lucide-react";
+import { Mic, User, ArrowRight, Play, Loader2, RotateCcw, TriangleAlert, CircleCheck, Info } from "lucide-react";
 
 type Props = {
   view: LabView;
@@ -27,6 +27,8 @@ export function TranscriptPanel({ view, onRun, running }: Props) {
           </div>
         </div>
       </header>
+
+      <EngineBanner llmRun={view.llmRun} />
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto max-w-2xl space-y-4">
@@ -70,6 +72,46 @@ export function TranscriptPanel({ view, onRun, running }: Props) {
   );
 }
 
+// Tells the viewer exactly what produced this transcript, so a silent
+// LLM→deterministic fallback can never pass as a live model run.
+function EngineBanner({ llmRun }: { llmRun?: { turns: number; fallbacks: number } }) {
+  if (!llmRun) {
+    return (
+      <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-6 py-2 text-[11.5px] text-slate-500">
+        <Info className="size-3.5 shrink-0" />
+        <span>
+          Deterministic mode — a fixed golden transcript; prompt edits are not applied. Switch to LLM
+          to run your prompt against the live model.
+        </span>
+      </div>
+    );
+  }
+  if (llmRun.fallbacks > 0) {
+    return (
+      <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-6 py-2 text-[11.5px] text-amber-800">
+        <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+        <span>
+          <span className="font-semibold">
+            {llmRun.fallbacks}/{llmRun.turns} turns fell back to the deterministic script.
+          </span>{" "}
+          The model's output was rejected (it didn't match the required JSON schema) or the call
+          failed, so the transcript and scorecard reflect the fallback — not your prompt. Keep the
+          output-schema section of the prompt intact.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 border-b border-emerald-200 bg-emerald-50 px-6 py-2 text-[11.5px] text-emerald-700">
+      <CircleCheck className="size-3.5 shrink-0" />
+      <span>
+        <span className="font-semibold">Live model</span> — all {llmRun.turns} agent turns were
+        generated from your prompt.
+      </span>
+    </div>
+  );
+}
+
 function TurnBubble({ turn }: { turn: Turn }) {
   const isAgent = turn.role === "agent";
   return (
@@ -102,6 +144,12 @@ function TurnBubble({ turn }: { turn: Turn }) {
           >
             {isAgent ? "Voice Agent" : turn.role === "system" ? "System" : "Customer"}
           </span>
+          {turn.source === "fallback" && (
+            <span className="inline-flex items-center gap-1 rounded px-1.5 py-px text-[10px] uppercase tracking-wide bg-amber-100 text-amber-800 ring-1 ring-inset ring-amber-200">
+              <TriangleAlert className="size-2.5" />
+              fallback
+            </span>
+          )}
         </div>
         <div
           className={cn(

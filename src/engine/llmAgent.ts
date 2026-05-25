@@ -39,6 +39,24 @@ const OutputSchema = z.object({
   confidence: z.number(),
 });
 
+// The output contract is owned by the HARNESS, not the editable system prompt,
+// and is sent with every request. This is what makes the lab robust to thin or
+// behavioral-only prompts (e.g. a one-line "You are an insurance agent"): the
+// model is always told exactly which JSON to emit, so its real behavior is
+// captured and scored instead of producing an off-schema reply that falls back.
+// Separating behavioral prompt (designed/edited) from output contract (enforced
+// by the harness) mirrors how production agent frameworks inject structured
+// output, and keeps prompt iteration from ever breaking the runner.
+const OUTPUT_CONTRACT = `Respond with ONLY a single JSON object for your NEXT turn — no prose, no markdown, no code fences. Use EXACTLY these keys:
+{
+  "spoken_response": string,            // what you say to the caller this turn
+  "state": "greeting" | "identity_verification" | "policy_lookup" | "intake" | "tool_call" | "coverage_boundary" | "escalation" | "resolved",
+  "next_required_field": string | null, // the field you are collecting next, or null
+  "tool_call": { "name": "verifyIdentity" | "lookupPolicy" | "createClaim" | "updatePolicyDraft" | "escalateToHuman", "args": object } | null,
+  "risk_flags": string[],               // e.g. ["injury"], ["prompt_injection"], or []
+  "confidence": number                  // 0..1
+}`;
+
 function buildUserPrompt(ctx: AgentContext): string {
   const transcript = ctx.history.map((t) => `${t.speaker}: ${t.text}`).join("\n");
   const facts = [
@@ -54,7 +72,7 @@ function buildUserPrompt(ctx: AgentContext): string {
   return [
     transcript ? `Conversation so far:\n${transcript}` : "This is the very start of the call.",
     `\nContext:\n${facts}`,
-    "\nProduce ONLY a single JSON object for your NEXT turn, matching the output schema. No prose, no code fences.",
+    `\n${OUTPUT_CONTRACT}`,
   ].join("\n");
 }
 
@@ -80,11 +98,15 @@ export function makeLlmAgent(systemPrompt: string): Agent {
       if (!res.ok) throw new Error(`llm proxy responded ${res.status}`);
       const data = (await res.json()) as { content?: string };
       const parsed = data.content ? parseOutput(data.content) : null;
-      if (parsed) return parsed;
+      if (parsed) return { ...parsed, source: "llm" };
       throw new Error("LLM returned no valid structured output");
     } catch {
-      // Graceful fallback keeps the demo reliable even if the model misbehaves.
-      return deterministicAgent(ctx);
+      // Graceful fallback keeps the demo reliable even if the model misbehaves —
+      // but we tag the turn as "fallback" so the UI can show that this turn is
+      // the deterministic script, not the live model. A silent fallback would
+      // otherwise hide a rejected/non-conforming model response.
+      const fallback = await deterministicAgent(ctx);
+      return { ...fallback, source: "fallback" };
     }
   };
 }

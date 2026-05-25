@@ -12,6 +12,9 @@ export interface Turn {
   text: string;
   /** Optional state-transition or tool chip rendered under the turn. */
   transition?: string;
+  /** For agent turns in LLM mode: "llm" if the model produced it, "fallback" if
+   *  the model's output was rejected and the deterministic script filled in. */
+  source?: "llm" | "fallback";
 }
 
 export interface ToolCallView {
@@ -45,6 +48,10 @@ export interface LabView {
   scorecard: ScoreRow[];
   overallScore: string;
   architectureNotes: string;
+  /** Present only for LLM-mode runs: how many agent turns came from the live
+   *  model vs. fell back to the deterministic script. Drives the engine banner
+   *  so a silent fallback can't pass as a live run. Undefined ⇒ deterministic. */
+  llmRun?: { turns: number; fallbacks: number };
 }
 
 export interface ScenarioMeta {

@@ -32,6 +32,13 @@ export type ToolName =
 
 export type ToolStatus = "success" | "failed" | "skipped";
 
+/** Which engine actually produced an agent turn. "llm" = the model's output was
+ *  used; "fallback" = the model output was rejected (bad/missing schema) or the
+ *  call failed, so the deterministic agent filled in. Undefined in plain
+ *  deterministic mode. Surfaced in the UI so a silent fallback can't masquerade
+ *  as a live model run. */
+export type AgentSource = "llm" | "fallback";
+
 export interface ToolCall {
   id: string;
   name: ToolName;
@@ -51,6 +58,8 @@ export interface AgentTurn {
   /** Tool invoked as part of this turn, if any. */
   toolCall?: ToolCall;
   riskFlags?: string[];
+  /** For agent turns: which engine produced it (see AgentSource). */
+  source?: AgentSource;
 }
 
 /**
@@ -65,6 +74,8 @@ export interface AgentOutput {
   tool_call: { name: ToolName; args: Record<string, unknown> } | null;
   risk_flags: string[];
   confidence: number;
+  /** Set by the LLM agent wrapper; left undefined by the deterministic agent. */
+  source?: AgentSource;
 }
 
 export type EvalStatus = "pass" | "fail" | "warn";

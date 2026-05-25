@@ -59,7 +59,7 @@ export function mapRunToLabView(
       if (turn.toolCall) transition = `→ tool: ${turn.toolCall.name}`;
       else if (turn.state && prevState && turn.state !== prevState) transition = `→ ${turn.state}`;
       if (turn.state) prevState = turn.state;
-      return { role: "agent", speaker: "Aria", text: turn.text, transition };
+      return { role: "agent", speaker: "Aria", text: turn.text, transition, source: turn.source };
     }
     return {
       role: turn.speaker,
@@ -84,6 +84,15 @@ export function mapRunToLabView(
     note: item.rationale,
   }));
 
+  const agentTurns = run.turns.filter((t) => t.speaker === "agent");
+  const llmRun =
+    run.mode === "llm"
+      ? {
+          turns: agentTurns.length,
+          fallbacks: agentTurns.filter((t) => t.source === "fallback").length,
+        }
+      : undefined;
+
   return {
     id: scenario.id,
     title: scenario.title,
@@ -98,5 +107,6 @@ export function mapRunToLabView(
     scorecard,
     overallScore: `${run.evaluation.totalScore}/${run.evaluation.maxScore}`,
     architectureNotes: scenario.architectureNotes,
+    llmRun,
   };
 }

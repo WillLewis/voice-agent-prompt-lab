@@ -53,6 +53,7 @@ export async function runConversation(
       text: output.spoken_response,
       state: output.state,
       riskFlags: output.risk_flags.length ? output.risk_flags : undefined,
+      source: output.source,
     };
 
     if (output.tool_call) {
