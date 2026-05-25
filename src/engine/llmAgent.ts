@@ -1,12 +1,14 @@
 import { z } from "zod";
 import type { Agent, AgentContext, AgentOutput } from "./types";
 import { deterministicAgent } from "./deterministicAgent";
-import { INSURANCE_VOICE_AGENT_PROMPT } from "../prompts/insuranceVoiceAgentPrompt";
 
 // LLM-backed agent. Runs in the browser and calls the local /api/llm proxy so
 // the API key stays server-side. The model's structured output is validated with
 // Zod; on any error (network, bad JSON, schema mismatch) it falls back to the
 // deterministic agent so a run always completes.
+//
+// The system prompt is INJECTED (not imported) so the UI can run an edited prompt
+// through a live model — that is what makes the prompt-regression loop real.
 
 const OutputSchema = z.object({
   spoken_response: z.string(),
@@ -67,20 +69,22 @@ function parseOutput(content: string): AgentOutput | null {
   }
 }
 
-export const llmAgent: Agent = async (ctx: AgentContext): Promise<AgentOutput> => {
-  try {
-    const res = await fetch("/api/llm", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ system: INSURANCE_VOICE_AGENT_PROMPT, user: buildUserPrompt(ctx) }),
-    });
-    if (!res.ok) throw new Error(`llm proxy responded ${res.status}`);
-    const data = (await res.json()) as { content?: string };
-    const parsed = data.content ? parseOutput(data.content) : null;
-    if (parsed) return parsed;
-    throw new Error("LLM returned no valid structured output");
-  } catch {
-    // Graceful fallback keeps the demo reliable even if the model misbehaves.
-    return deterministicAgent(ctx);
-  }
-};
+export function makeLlmAgent(systemPrompt: string): Agent {
+  return async (ctx: AgentContext): Promise<AgentOutput> => {
+    try {
+      const res = await fetch("/api/llm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ system: systemPrompt, user: buildUserPrompt(ctx) }),
+      });
+      if (!res.ok) throw new Error(`llm proxy responded ${res.status}`);
+      const data = (await res.json()) as { content?: string };
+      const parsed = data.content ? parseOutput(data.content) : null;
+      if (parsed) return parsed;
+      throw new Error("LLM returned no valid structured output");
+    } catch {
+      // Graceful fallback keeps the demo reliable even if the model misbehaves.
+      return deterministicAgent(ctx);
+    }
+  };
+}

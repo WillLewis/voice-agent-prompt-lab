@@ -23,8 +23,9 @@ dist-ssr
 # Local env / secrets (never commit)
 .env
 .env.*
-!.env.example
-!.dev.vars.example
+.env.example
+.dev.vars.example
+.dev.vars
 
 # Editor directories and files
 .vscode/*

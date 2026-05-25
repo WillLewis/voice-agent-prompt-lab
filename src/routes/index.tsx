@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { SCENARIOS } from "@/data/scenarios";
 import { runLab, runAllDeterministic } from "@/lab/run";
+import { INSURANCE_VOICE_AGENT_PROMPT } from "@/prompts/insuranceVoiceAgentPrompt";
 import type { LabView, ScenarioMeta } from "@/lab/types";
 import type { RunMode } from "@/engine/types";
 import { ScenarioList } from "@/components/lab/ScenarioList";
@@ -18,6 +19,7 @@ function Index() {
   const [views, setViews] = useState<Record<string, LabView>>({});
   const [activeId, setActiveId] = useState(SCENARIOS[0].id);
   const [mode, setMode] = useState<RunMode>("deterministic");
+  const [prompt, setPrompt] = useState(INSURANCE_VOICE_AGENT_PROMPT);
   const [running, setRunning] = useState(false);
   const [llm, setLlm] = useState<{ available: boolean; provider?: string }>({ available: false });
 
@@ -61,7 +63,7 @@ function Index() {
   async function handleRun() {
     setRunning(true);
     try {
-      const v = await runLab(activeId, mode);
+      const v = await runLab(activeId, mode, prompt);
       setViews((prev) => ({ ...prev, [activeId]: v }));
     } finally {
       setRunning(false);
@@ -105,7 +107,14 @@ function Index() {
         {activeView ? (
           <>
             <TranscriptPanel view={activeView} onRun={handleRun} running={running} />
-            <InspectorTabs view={activeView} />
+            <InspectorTabs
+              view={activeView}
+              prompt={prompt}
+              mode={mode}
+              edited={prompt !== INSURANCE_VOICE_AGENT_PROMPT}
+              onPromptChange={setPrompt}
+              onResetPrompt={() => setPrompt(INSURANCE_VOICE_AGENT_PROMPT)}
+            />
           </>
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-slate-400">

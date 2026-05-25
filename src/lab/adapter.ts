@@ -45,7 +45,11 @@ function overallStatus(items: { status: EvalStatus }[]): EvalStatus {
   return "pass";
 }
 
-export function mapRunToLabView(scenario: Scenario, run: RunResult): LabView {
+export function mapRunToLabView(
+  scenario: Scenario,
+  run: RunResult,
+  systemPrompt: string = INSURANCE_VOICE_AGENT_PROMPT,
+): LabView {
   const caller = customerName(scenario.persona);
 
   let prevState: AgentState | undefined;
@@ -88,7 +92,7 @@ export function mapRunToLabView(scenario: Scenario, run: RunResult): LabView {
     risk: scenario.risk,
     state: STATE_TO_CALLSTATE[run.finalState],
     lastEval: overallStatus(run.evaluation.items),
-    systemPrompt: INSURANCE_VOICE_AGENT_PROMPT,
+    systemPrompt,
     transcript,
     toolCalls,
     scorecard,
