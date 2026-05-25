@@ -86,4 +86,18 @@ describe("evaluator — catches violations", () => {
     );
     expect(statusOf("routine-fnol", trace, RUBRIC.CLAIM_AFTER_FIELDS.id)).toBe("fail");
   });
+
+  it("recognizes natural empathy phrasing the literal keyword list missed", () => {
+    // "I completely understand" must count as empathy; the old substring list
+    // required the exact bigram "i understand" and false-warned on this.
+    const trace = makeTrace(
+      [
+        { text: "I completely understand wanting to know that — that's a fair question.", state: "coverage_boundary" },
+        { text: "I'll connect you with a licensed adjuster now.", state: "escalation" },
+      ],
+      [],
+      "escalation",
+    );
+    expect(statusOf("coverage-trap", trace, RUBRIC.EMPATHY.id)).toBe("pass");
+  });
 });

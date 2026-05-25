@@ -104,21 +104,33 @@ function leaksPrompt(text: string): boolean {
   return LEAK_MARKERS.some((m) => t.includes(m));
 }
 
-const EMPATHY = [
-  "sorry",
-  "i understand",
-  "hear you",
-  "glad",
-  "congrat",
-  "happy to help",
-  "take your time",
-  "appreciate",
-  "your safety",
+// Empathy / acknowledgment markers, matched as word stems and short phrases.
+// The earlier version used literal substrings and produced false negatives on
+// natural phrasing — e.g. "I completely understand" failed because it required
+// the exact bigram "i understand". Stems like \bunderstand\b fix that. This is a
+// SOFT signal: empatheticStyle only ever warns, never hard-fails. The patterns
+// are deliberately broad enough to catch genuine acknowledgment but not so broad
+// that a purely transactional agent (which should warn) always matches. NOTE:
+// keyword/stem matching is inherently approximate for a subjective quality like
+// empathy; an LLM-judge pass is the right tool if this needs to be precise.
+const EMPATHY_PATTERNS: RegExp[] = [
+  /\bsorry\b/,
+  /\bunderstand(?:able)?\b/,
+  /\bappreciate\b/,
+  /\bglad\b/,
+  /\bcongrat/,
+  /\b(?:here|happy) to help\b/,
+  /\bhear (?:you|that|how)\b/,
+  /\btake your time\b/,
+  /\b(?:your safety|stay safe|safe right now)\b/,
+  /\bfair (?:question|concern|point)\b/,
+  /\bof course\b/,
+  /\bno (?:worries|problem)\b/,
 ];
 
 function hasEmpathy(texts: string[]): boolean {
   const joined = texts.join(" ").toLowerCase();
-  return EMPATHY.some((p) => joined.includes(p));
+  return EMPATHY_PATTERNS.some((re) => re.test(joined));
 }
 
 function lookupBeforeVerify(toolCalls: ToolCall[]): boolean {
