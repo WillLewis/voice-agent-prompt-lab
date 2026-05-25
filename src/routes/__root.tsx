@@ -103,6 +103,7 @@ function RootShell({ children }: { children: React.ReactNode }) {
     <html lang="en">
       <head>
         <HeadContent />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </head>
       <body>
         {children}

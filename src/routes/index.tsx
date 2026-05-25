@@ -8,7 +8,7 @@ import { ScenarioList } from "@/components/lab/ScenarioList";
 import { TranscriptPanel } from "@/components/lab/TranscriptPanel";
 import { InspectorTabs } from "@/components/lab/InspectorTabs";
 import { NeutralBadge } from "@/components/lab/StatusBadge";
-import { Activity, FlaskConical, Loader2 } from "lucide-react";
+import { Activity, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -72,9 +72,7 @@ function Index() {
     <div className="flex h-screen flex-col bg-slate-100 text-slate-900">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5">
         <div className="flex items-center gap-3">
-          <div className="flex size-7 items-center justify-center rounded-md bg-slate-900 text-white">
-            <FlaskConical className="size-4" />
-          </div>
+          <img src="/favicon.svg" alt="Liberate Prompt Lab logo" className="size-7 rounded-md" />
           <div>
             <div className="text-sm font-semibold leading-tight text-slate-900">
               Liberate Prompt Lab
