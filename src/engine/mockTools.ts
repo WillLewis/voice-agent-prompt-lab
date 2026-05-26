@@ -23,6 +23,26 @@ function stableInt(s: string): number {
   return h;
 }
 
+/** First non-empty string value among candidate keys — tolerates the several
+ *  shapes/spellings an LLM might use for the same field. */
+function pickStr(obj: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  if (!obj) return undefined;
+  for (const k of keys) {
+    const v = str(obj[k]);
+    if (v && v.trim() !== "") return v;
+  }
+  return undefined;
+}
+
+function normName(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Reduce a ZIP to its first five digits so "78701", "78701-1234", "78701." all match. */
+function zip5(s: string): string {
+  return (s.match(/\d/g) ?? []).join("").slice(0, 5);
+}
+
 export function verifyIdentity(args: Record<string, unknown>): ToolOutcome {
   const customerId = str(args.customerId);
   const customer = customerId ? MOCK_CUSTOMERS[customerId] : undefined;
@@ -32,18 +52,36 @@ export function verifyIdentity(args: Record<string, unknown>): ToolOutcome {
       status: "failed",
     };
   }
+  // Tolerate either a nested verificationAnswers object or flat args, plus common
+  // key spellings — the agent may structure the call differently, but a clear
+  // name + ZIP match should still verify.
   const answers = (args.verificationAnswers ?? {}) as Record<string, unknown>;
-  const nameOk =
-    str(answers.fullName)?.trim().toLowerCase() === customer.verification.fullName.toLowerCase();
-  const zipOk = str(answers.zip)?.trim() === customer.verification.zip;
+  const nameKeys = ["fullName", "name", "full_name"];
+  const zipKeys = ["zip", "zipCode", "zip_code", "postalCode", "postal_code"];
+  const providedName = pickStr(answers, nameKeys) ?? pickStr(args, nameKeys);
+  const providedZip = pickStr(answers, zipKeys) ?? pickStr(args, zipKeys);
+
+  const expectedName = normName(customer.verification.fullName);
+  const gotName = providedName ? normName(providedName) : "";
+  // Exact match, or the record name embedded in a longer answer (e.g. the model
+  // passing "Dale Kim, 78701" as the name).
+  const nameOk = gotName !== "" && (gotName === expectedName || gotName.includes(expectedName));
+  const zipOk = providedZip != null && zip5(providedZip) === zip5(customer.verification.zip);
+
   if (nameOk && zipOk) {
     return {
       result: { verified: true, confidence: 0.98, reason: "Name and ZIP match the policyholder record." },
       status: "success",
     };
   }
+  // Actionable reason so the agent can ask for the specific missing/incorrect detail.
+  const missing = [!nameOk ? "full name" : null, !zipOk ? "ZIP code" : null].filter(Boolean).join(" and ");
   return {
-    result: { verified: false, confidence: 0.2, reason: "Provided details did not match our records." },
+    result: {
+      verified: false,
+      confidence: 0.2,
+      reason: `Could not verify identity: the ${missing} did not match our records. Ask the caller to re-confirm their ${missing}.`,
+    },
     status: "failed",
   };
 }

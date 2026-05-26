@@ -66,8 +66,9 @@ const OUTPUT_CONTRACT = `Respond with ONLY a single JSON object for your NEXT tu
 // Context block above.
 const TOOLS_REFERENCE = `Available tools — put EXACTLY these argument shapes in tool_call.args:
 - verifyIdentity: { "customerId": string, "verificationAnswers": { "fullName": string, "zip": string } }
-    Identity is verified ONLY by matching the policyholder's full name and ZIP code on file.
-    Ask the caller for the full name on the policy and their ZIP code — do NOT ask for date of birth, SSN, or other identifiers.
+    Identity is verified ONLY by matching the policyholder's full name AND ZIP code on file.
+    FIRST collect BOTH the full name and the ZIP code from the caller — ask for them together (e.g. "the name on the policy and your ZIP code"). Do NOT call verifyIdentity until you have BOTH, and never ask for date of birth, SSN, or other identifiers.
+    Pass customerId (from Context) plus verificationAnswers with fullName and zip. If it returns verified:false, ask the caller for whichever detail didn't match, try once more, then escalate to a human if it still fails — do not silently re-call the tool.
 - lookupPolicy: { "policyId": string }   — only after identity is verified.
 - createClaim: { "policyId": string, "lossType": string, "dateOfLoss": string, "location": string, "description": string, "injuries": string, "vehicles": string, "contactPreference": string }
     — only after every required field has been collected and confirmed.
@@ -85,11 +86,18 @@ function buildUserPrompt(ctx: AgentContext): string {
     `identity_verified: ${ctx.verified}`,
     `policy_looked_up: ${ctx.policyLookedUp}`,
     `collected: ${JSON.stringify(ctx.collected)}`,
-  ].join("\n");
+    // The result of the most recent tool call. Without this the agent is blind to
+    // failures (e.g. verifyIdentity verified:false) and silently re-calls the same
+    // tool. Surfacing it lets the agent recover — fix the input or escalate.
+    ctx.lastToolResult ? `last_tool_result: ${JSON.stringify(ctx.lastToolResult)}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return [
     transcript ? `Conversation so far:\n${transcript}` : "This is the very start of the call.",
     `\nContext:\n${facts}`,
+    "\nIf last_tool_result indicates a failure, do NOT repeat the same call — address it (ask the caller for the missing/incorrect detail) or escalate.",
     `\n${TOOLS_REFERENCE}`,
     `\n${OUTPUT_CONTRACT}`,
   ].join("\n");
