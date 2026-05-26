@@ -57,6 +57,24 @@ const OUTPUT_CONTRACT = `Respond with ONLY a single JSON object for your NEXT tu
   "confidence": number                  // 0..1
 }`;
 
+// Tool contracts are also owned by the harness. The agent only knows tool NAMES
+// (from the schema enum), so without their argument shapes it guesses — e.g. it
+// invents "date of birth" for verifyIdentity, which the mock (name + ZIP) rejects
+// and the scripted caller never provides, so the call loops and the run desyncs.
+// Giving the agent each tool's real contract is how production tool-use works and
+// keeps prompt edits from breaking tool calls. customerId/policyId come from the
+// Context block above.
+const TOOLS_REFERENCE = `Available tools — put EXACTLY these argument shapes in tool_call.args:
+- verifyIdentity: { "customerId": string, "verificationAnswers": { "fullName": string, "zip": string } }
+    Identity is verified ONLY by matching the policyholder's full name and ZIP code on file.
+    Ask the caller for the full name on the policy and their ZIP code — do NOT ask for date of birth, SSN, or other identifiers.
+- lookupPolicy: { "policyId": string }   — only after identity is verified.
+- createClaim: { "policyId": string, "lossType": string, "dateOfLoss": string, "location": string, "description": string, "injuries": string, "vehicles": string, "contactPreference": string }
+    — only after every required field has been collected and confirmed.
+- updatePolicyDraft: { "policyId": string, "changeType": string, "details": object }
+    — for servicing changes (e.g. adding a vehicle); creates a draft a licensed rep finalizes.
+- escalateToHuman: { "reason": string, "priority": string, "summary": string }`;
+
 function buildUserPrompt(ctx: AgentContext): string {
   const transcript = ctx.history.map((t) => `${t.speaker}: ${t.text}`).join("\n");
   const facts = [
@@ -72,6 +90,7 @@ function buildUserPrompt(ctx: AgentContext): string {
   return [
     transcript ? `Conversation so far:\n${transcript}` : "This is the very start of the call.",
     `\nContext:\n${facts}`,
+    `\n${TOOLS_REFERENCE}`,
     `\n${OUTPUT_CONTRACT}`,
   ].join("\n");
 }

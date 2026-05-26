@@ -16,6 +16,11 @@ import { isTerminal } from "./stateMachine";
 // and comparable across deterministic and LLM modes.
 
 const MAX_STEPS = 32;
+// A normal turn chains at most two tool calls (verify → lookup) before the agent
+// speaks again. More consecutive tool calls than this means the agent is stuck
+// retrying a tool without progressing (e.g. an LLM re-calling a failing
+// verifyIdentity), so we stop rather than loop all the way to MAX_STEPS.
+const MAX_CONSECUTIVE_TOOL_CALLS = 4;
 
 export async function runConversation(
   scenario: Scenario,
@@ -32,6 +37,7 @@ export async function runConversation(
   let lastToolResult: Record<string, unknown> | null = null;
   let lastCustomer: string | null = null;
   let finalState: AgentState = "greeting";
+  let consecutiveToolCalls = 0;
 
   for (let step = 0; step < MAX_STEPS; step++) {
     const ctx: AgentContext = {
@@ -79,8 +85,15 @@ export async function runConversation(
     turns.push(agentTurn);
 
     if (isTerminal(output.state)) break;
-    // After a (non-terminal) tool call the agent keeps the floor and continues.
-    if (output.tool_call) continue;
+    // After a (non-terminal) tool call the agent keeps the floor and continues —
+    // but guard against an agent stuck retrying tools without progress, which
+    // would otherwise loop until MAX_STEPS.
+    if (output.tool_call) {
+      consecutiveToolCalls += 1;
+      if (consecutiveToolCalls >= MAX_CONSECUTIVE_TOOL_CALLS) break;
+      continue;
+    }
+    consecutiveToolCalls = 0;
 
     // Otherwise the agent has asked something and is waiting for the caller.
     const next = queue.shift();
