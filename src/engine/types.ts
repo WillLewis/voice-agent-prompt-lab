@@ -120,6 +120,9 @@ export interface Scenario {
   policyId: string;
   /** Notes rendered in the UI "Architecture" tab. */
   architectureNotes: string;
+  /** Private caller facts for the adaptive LLM caller (Item 1). When present,
+   *  the LLM caller uses these to answer the agent's questions naturally. */
+  callerBrief?: CallerBrief;
 }
 
 export type RunMode = "deterministic" | "llm";
@@ -129,6 +132,9 @@ export interface ConversationTrace {
   turns: AgentTurn[];
   toolCalls: ToolCall[];
   finalState: AgentState;
+  /** True when ASR noise was applied to caller utterances (Item 5). Used by
+   *  the confirms_critical_details rubric check. */
+  noiseEnabled?: boolean;
 }
 
 /** Full result of running one scenario end-to-end (trace + score). */
@@ -153,3 +159,41 @@ export interface AgentContext {
 
 /** An agent decides the next turn given context. Deterministic or LLM-backed. */
 export type Agent = (ctx: AgentContext) => Promise<AgentOutput>;
+
+// ---------------------------------------------------------------------------
+// Caller types — adaptive LLM "customer" agent (Item 1)
+// ---------------------------------------------------------------------------
+
+/** Personas shape how the simulated caller behaves in LLM mode. */
+export type CallerPersona =
+  | "cooperative"
+  | "rushed"
+  | "confused"
+  | "irate"
+  | "evasive-adversarial";
+
+/** Private facts the LLM caller uses to answer the agent's questions naturally.
+ *  Sourced from mockCustomers (name/ZIP) + scenario-specific loss details. */
+export interface CallerBrief {
+  /** Full name for identity verification. */
+  fullName: string;
+  /** ZIP code for identity verification. */
+  zip: string;
+  /** What happened and what the caller knows — the narrative the caller will
+   *  draw on to answer questions. Keep it concrete so the LLM can improvise. */
+  lossContext: string;
+}
+
+/** Minimal context the runner hands to the caller on each turn. The brief and
+ *  persona are closed over in the caller factory, not passed at call time. */
+export interface CallerContext {
+  /** Full transcript so far (agent + customer + system turns). */
+  history: AgentTurn[];
+  /** The agent's most recent utterance the caller must now respond to. */
+  lastAgentUtterance: string;
+}
+
+/** A caller produces the next customer utterance. Scripted callers shift from
+ *  a fixed queue; LLM callers generate via a live model. Returning end:true or
+ *  an empty utterance terminates the conversation. */
+export type Caller = (ctx: CallerContext) => Promise<{ utterance: string; end?: boolean }>;

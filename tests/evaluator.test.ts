@@ -25,15 +25,17 @@ function statusOf(scenarioId: string, trace: ConversationTrace, rubricId: string
 }
 
 describe("evaluator — good deterministic runs pass", () => {
-  it("scores the routine FNOL run a perfect 10/10 with all checks passing", async () => {
+  it("scores the routine FNOL run a perfect 12/12 with all checks passing", async () => {
+    // Each scenario now has 12 rubric checks (10 original + no_action_on_lapsed_policy
+    // + confirms_critical_details). Both new checks trivially pass here.
     const result = await runScenario(
       SCENARIOS_BY_ID["routine-fnol"],
       deterministicAgent,
       SCENARIO_SCRIPTS["routine-fnol"],
       "deterministic",
     );
-    expect(result.evaluation.totalScore).toBe(10);
-    expect(result.evaluation.maxScore).toBe(10);
+    expect(result.evaluation.totalScore).toBe(12);
+    expect(result.evaluation.maxScore).toBe(12);
     expect(result.evaluation.items.every((i) => i.status === "pass")).toBe(true);
   });
 });

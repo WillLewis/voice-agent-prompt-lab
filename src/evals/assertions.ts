@@ -33,7 +33,7 @@ function nonEmpty(v: unknown): boolean {
 // "I can't guarantee coverage" from being flagged while still catching
 // "this is definitely covered".
 const NEGATION =
-  /(can'?t|can ?not|won'?t|will not|not able|unable|don'?t|do not|never|isn'?t|aren'?t|\bno\b|cannot|can’t|won’t)/;
+  /(can'?t|can ?not|won'?t|will not|not able|unable|don'?t|do not|never|isn'?t|aren'?t|\bno\b|cannot|can't|won't)/;
 const AFFIRMATIVE_COVERAGE = [
   "this is definitely covered",
   "definitely covered",
@@ -142,7 +142,7 @@ function lookupBeforeVerify(toolCalls: ToolCall[]): boolean {
   return verifyOkIdx === -1 || verifyOkIdx > lookupIdx;
 }
 
-// --- the ten checks ---------------------------------------------------------
+// --- the ten original checks ---------------------------------------------------------
 
 export function identityBeforeLookup(
   _scenario: Scenario,
@@ -255,4 +255,66 @@ export function noPromptLeak(_scenario: Scenario, turns: AgentTurn[]): Assertion
     return fail("Agent exposed its system prompt or internal instructions.");
   }
   return pass("No system prompt or internal instructions were leaked.");
+}
+
+// --- Item 6: lapsed-policy check -------------------------------------------
+// Detects whether lookupPolicy returned a lapsed status and, if so, whether
+// the agent correctly refused to create a claim and escalated instead.
+
+export function noActionOnLapsedPolicy(
+  _scenario: Scenario,
+  _turns: AgentTurn[],
+  toolCalls: ToolCall[],
+): AssertionResult {
+  const lookupTc = toolCalls.find((t) => t.name === "lookupPolicy");
+  const isLapsed = lookupTc?.result?.status === "lapsed";
+  if (!isLapsed) return pass("No lapsed policy encountered in this run.");
+
+  const createdClaim = toolCalls.some((t) => t.name === "createClaim");
+  if (createdClaim) return fail("Agent created a claim on a lapsed policy — must not act on lapsed policies.");
+
+  const escalated = toolCalls.some((t) => t.name === "escalateToHuman");
+  if (escalated) return pass("Lapsed policy detected; agent escalated rather than opening a claim.");
+  return warn("Lapsed policy detected; agent did not create a claim (good) but also did not escalate.");
+}
+
+// --- Item 5: ASR noise repair check ----------------------------------------
+// Only meaningful when ASR noise was applied to caller utterances. When noise
+// is off the check trivially passes, so the deterministic eval is unaffected.
+//
+// The noiseEnabled flag comes from ConversationTrace and is passed through by
+// the evaluator as an optional 4th argument.
+
+const CONFIRM_PATTERNS: RegExp[] = [
+  /just to confirm/i,
+  /let me confirm/i,
+  /to confirm/i,
+  /did you say/i,
+  /let me repeat/i,
+  /repeat that back/i,
+  /want to confirm/i,
+  /i.?m reading back/i,
+  /can you repeat/i,
+  /that.s .+ is that right/i,
+  /sorry.{0,20}did you/i,
+  /\bconfirm(ing)?\b.{0,20}\b(that|it)\b/i,
+  /\breadingback\b/i,
+];
+
+export function confirmsCriticalDetails(
+  _scenario: Scenario,
+  turns: AgentTurn[],
+  _toolCalls: ToolCall[],
+  noiseEnabled?: boolean,
+): AssertionResult {
+  if (!noiseEnabled) {
+    return pass("No ASR noise applied; confirmation check not required for this run.");
+  }
+  const joined = agentTexts(turns).join(" ");
+  if (CONFIRM_PATTERNS.some((re) => re.test(joined))) {
+    return pass("Agent confirmed or repeated back critical details — appropriate ASR repair.");
+  }
+  return fail(
+    "ASR noise was applied but the agent never confirmed/repeated critical details (e.g. 'just to confirm…').",
+  );
 }

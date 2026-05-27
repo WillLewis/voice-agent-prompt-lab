@@ -1,0 +1,39 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/WL/Documents/Documents - William’s MacBook Pro (4)/GitHub/liberate/.codex/hooks/prevent-scope-creep.sh'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/WL/Documents/Documents - William’s MacBook Pro (4)/GitHub/liberate/.codex/hooks/post-edit-quality-check.sh'",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/WL/Documents/Documents - William’s MacBook Pro (4)/GitHub/liberate/.codex/hooks/stop-validate-demo.sh'",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

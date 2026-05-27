@@ -1,33 +1,12 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
-import { selectProvider, callProvider, type EnvKeys } from "../engine/llmClient";
+import { selectProvider, callProvider, callProviderFreeform } from "../engine/llmClient";
+import { loadEnvKeys } from "./envKeys";
 
-// Dev-only middleware that exposes /api/llm and /api/llm-status. The API key is
-// read server-side (from .dev.vars / .env or process.env) and never sent to the
-// browser. LLM mode is optional; with no key the status endpoint reports
-// unavailable and the UI keeps the toggle disabled.
-
-const KEY_NAMES = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LPL_MODEL"] as const;
-
-function loadEnvKeys(root: string): EnvKeys {
-  const env: Record<string, string> = {};
-  for (const file of [".dev.vars", ".env", ".env.local"]) {
-    const path = resolve(root, file);
-    if (!existsSync(path)) continue;
-    for (const line of readFileSync(path, "utf8").split("\n")) {
-      const m = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/);
-      if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, "");
-    }
-  }
-  // Real process env wins over files.
-  for (const k of KEY_NAMES) {
-    const v = process.env[k];
-    if (v) env[k] = v;
-  }
-  return env as EnvKeys;
-}
+// Dev-only middleware that exposes /api/llm, /api/llm-judge, and /api/llm-status.
+// The API key is read server-side (from .dev.vars / .env or process.env) and never
+// sent to the browser. LLM mode is optional; with no key the status endpoint
+// reports unavailable and the UI keeps the toggles disabled.
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolveBody) => {
@@ -54,6 +33,8 @@ export function llmProxyPlugin(): Plugin {
         json(res, 200, { available: !!sel, provider: sel?.provider ?? null });
       });
 
+      // Main agent endpoint (tool-forced structured output for the agent;
+      // freeform text for the caller when body.freeform === true).
       server.middlewares.use("/api/llm", async (req, res, next) => {
         if (req.method !== "POST") return next();
         try {
@@ -62,8 +43,29 @@ export function llmProxyPlugin(): Plugin {
           const body = JSON.parse((await readBody(req)) || "{}") as {
             system?: string;
             user?: string;
+            freeform?: boolean;
           };
-          const content = await callProvider(sel, body.system ?? "", body.user ?? "");
+          const caller = body.freeform === true ? callProviderFreeform : callProvider;
+          const content = await caller(sel, body.system ?? "", body.user ?? "");
+          json(res, 200, { content });
+        } catch (err) {
+          json(res, 500, { error: err instanceof Error ? err.message : String(err) });
+        }
+      });
+
+      // LLM-judge endpoint (Item 3). Uses freeform text output — the model
+      // returns raw JSON text, not a tool-forced schema. This keeps the judge
+      // schema separate from the agent schema.
+      server.middlewares.use("/api/llm-judge", async (req, res, next) => {
+        if (req.method !== "POST") return next();
+        try {
+          const sel = selectProvider(loadEnvKeys(server.config.root));
+          if (!sel) return json(res, 503, { error: "No API key configured." });
+          const body = JSON.parse((await readBody(req)) || "{}") as {
+            system?: string;
+            user?: string;
+          };
+          const content = await callProviderFreeform(sel, body.system ?? "", body.user ?? "");
           json(res, 200, { content });
         } catch (err) {
           json(res, 500, { error: err instanceof Error ? err.message : String(err) });

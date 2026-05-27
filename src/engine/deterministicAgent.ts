@@ -252,6 +252,35 @@ const PLAYBOOKS: Record<string, Step[]> = {
         ["prompt_injection"],
       ),
   ],
+
+  // Item 6: Lapsed-policy scenario. The lookup returns status:"lapsed", so the
+  // agent must NOT create a claim and MUST escalate to a human instead.
+  "lapsed-policy": [
+    greeting,
+    () =>
+      ask(
+        "identity",
+        "I'm sorry to hear that — I'm here to help. To protect your account, can you give me the name on the policy and your ZIP code?",
+        "identity_verification",
+      ),
+    verifyStep,
+    lookupStep,
+    // The lookup result (ctx.lastToolResult.status === "lapsed") is visible here;
+    // the playbook always routes to escalation because we know the policy is lapsed.
+    () =>
+      tool(
+        "escalateToHuman",
+        {
+          reason: "lapsed_policy",
+          priority: "normal",
+          summary:
+            "Caller is requesting a claim on POL-DEMO-6000, which shows a lapsed status. Routing to a representative for reinstatement options.",
+        },
+        "I can see your policy isn't currently active — it looks like coverage may have lapsed. I'm not able to open a claim on a lapsed policy, but I'm connecting you with a representative right now who can walk you through your reinstatement options. I'm sorry for the extra step.",
+        "escalation",
+        ["lapsed_policy"],
+      ),
+  ],
 };
 
 export const deterministicAgent: Agent = async (ctx: AgentContext): Promise<AgentOutput> => {

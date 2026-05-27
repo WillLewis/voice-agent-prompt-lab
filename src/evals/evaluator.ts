@@ -3,7 +3,7 @@ import { RUBRIC, type RubricItem } from "./rubric";
 import * as checks from "./assertions";
 import type { AssertionResult } from "./assertions";
 
-// Composes the ten rule-based checks into a scored result. Scoring is simple and
+// Composes the rule-based checks into a scored result. Scoring is simple and
 // deterministic: pass = 1, warn = 0.5, fail = 0, out of one point per check.
 
 function weight(status: EvalStatus): number {
@@ -15,7 +15,7 @@ function item(rubric: RubricItem, result: AssertionResult): EvalItem {
 }
 
 export function evaluateRun(scenario: Scenario, trace: ConversationTrace): EvalResult {
-  const { turns, toolCalls } = trace;
+  const { turns, toolCalls, noiseEnabled } = trace;
 
   const items: EvalItem[] = [
     item(RUBRIC.IDENTITY_BEFORE_LOOKUP, checks.identityBeforeLookup(scenario, turns, toolCalls)),
@@ -28,6 +28,10 @@ export function evaluateRun(scenario: Scenario, trace: ConversationTrace): EvalR
     item(RUBRIC.FINAL_SUMMARY, checks.finalSummary(scenario, turns)),
     item(RUBRIC.EMPATHY, checks.empatheticStyle(scenario, turns)),
     item(RUBRIC.NO_PROMPT_LEAK, checks.noPromptLeak(scenario, turns)),
+    // Item 6: lapsed-policy check (trivially passes when no lapsed policy).
+    item(RUBRIC.NO_ACTION_ON_LAPSED_POLICY, checks.noActionOnLapsedPolicy(scenario, turns, toolCalls)),
+    // Item 5: ASR noise repair check (trivially passes when noiseEnabled is false/undefined).
+    item(RUBRIC.CONFIRMS_CRITICAL_DETAILS, checks.confirmsCriticalDetails(scenario, turns, toolCalls, noiseEnabled)),
   ];
 
   const raw = items.reduce((sum, i) => sum + weight(i.status), 0);

@@ -3,17 +3,25 @@ import type {
   AgentContext,
   AgentState,
   AgentTurn,
+  Caller,
+  CallerContext,
   ConversationTrace,
   Scenario,
   ToolCall,
 } from "./types";
 import { runTool } from "./mockTools";
 import { isTerminal } from "./stateMachine";
+import { perturbUtterance } from "../lib/noiseUtils";
 
 // Drives one scenario to completion. Agent-agnostic: it asks the supplied agent
-// for the next turn and executes any requested tool call. The customer side is
-// always scripted (opening utterance + scenarioScripts) so runs are reproducible
-// and comparable across deterministic and LLM modes.
+// for the next turn and executes any requested tool call.
+//
+// The customer side defaults to the scripted queue (fixed utterances → reproducible
+// runs). When an optional `caller` is supplied the runner calls it instead of
+// shifting from the queue, enabling a live LLM-backed "customer" (Item 1).
+//
+// When `noiseEnabled` is true, caller utterances are perturbed to simulate ASR
+// mis-recognitions — garbled digits in ZIPs, dates, and VINs (Item 5).
 
 const MAX_STEPS = 32;
 // A normal turn chains at most two tool calls (verify → lookup) before the agent
@@ -22,11 +30,20 @@ const MAX_STEPS = 32;
 // verifyIdentity), so we stop rather than loop all the way to MAX_STEPS.
 const MAX_CONSECUTIVE_TOOL_CALLS = 4;
 
+export interface RunConversationOptions {
+  /** Optional adaptive LLM caller. When absent, the scripted queue is used. */
+  caller?: Caller;
+  /** When true, caller utterances are perturbed with ASR-like noise (Item 5). */
+  noiseEnabled?: boolean;
+}
+
 export async function runConversation(
   scenario: Scenario,
   agent: Agent,
   customerScript: string[],
+  options: RunConversationOptions = {},
 ): Promise<ConversationTrace> {
+  const { caller, noiseEnabled = false } = options;
   const turns: AgentTurn[] = [];
   const toolCalls: ToolCall[] = [];
   const collected: Record<string, string> = {};
@@ -95,13 +112,29 @@ export async function runConversation(
     }
     consecutiveToolCalls = 0;
 
-    // Otherwise the agent has asked something and is waiting for the caller.
-    const next = queue.shift();
-    if (next === undefined) break;
-    lastCustomer = next;
-    if (output.next_required_field) collected[output.next_required_field] = next;
-    turns.push({ id: `t${turns.length}`, speaker: "customer", text: next });
+    // The agent has asked something and is waiting for the caller.
+    let next: string | undefined;
+
+    if (caller) {
+      // Live LLM caller: generate the customer's next utterance.
+      const lastAgent = agentTurn.text;
+      const callerCtx: CallerContext = { history: turns, lastAgentUtterance: lastAgent };
+      const result = await caller(callerCtx);
+      if (result.end || !result.utterance.trim()) break;
+      next = result.utterance;
+    } else {
+      // Scripted queue: pop the next pre-written line.
+      next = queue.shift();
+      if (next === undefined) break;
+    }
+
+    // Apply ASR noise to the caller utterance when requested (Item 5).
+    const utterance = noiseEnabled ? perturbUtterance(next) : next;
+
+    lastCustomer = utterance;
+    if (output.next_required_field) collected[output.next_required_field] = utterance;
+    turns.push({ id: `t${turns.length}`, speaker: "customer", text: utterance });
   }
 
-  return { turns, toolCalls, finalState };
+  return { turns, toolCalls, finalState, noiseEnabled };
 }

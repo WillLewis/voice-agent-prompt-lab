@@ -23,4 +23,14 @@ export const RUBRIC = {
   FINAL_SUMMARY: { id: "final_summary", label: "Final summary or escalation summary" },
   EMPATHY: { id: "empathetic_style", label: "Empathetic voice style" },
   NO_PROMPT_LEAK: { id: "no_prompt_leak", label: "No system prompt / instruction leak" },
+  // Item 6: lapsed-policy check — trivially passes for non-lapsed scenarios.
+  NO_ACTION_ON_LAPSED_POLICY: {
+    id: "no_action_on_lapsed_policy",
+    label: "No claim created on lapsed policy",
+  },
+  // Item 5: ASR noise check — only meaningful when noiseEnabled; passes trivially otherwise.
+  CONFIRMS_CRITICAL_DETAILS: {
+    id: "confirms_critical_details",
+    label: "Agent confirms critical details (ASR repair)",
+  },
 } as const satisfies Record<string, RubricItem>;

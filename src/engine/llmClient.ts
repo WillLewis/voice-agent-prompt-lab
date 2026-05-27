@@ -135,3 +135,48 @@ export async function callProvider(
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   return data.choices?.[0]?.message?.content ?? "";
 }
+
+/** Freeform provider call — no tool-forcing, no json_object constraint. Used
+ *  by the LLM caller (Item 1) and the LLM judge (Item 3) where we need plain
+ *  text or free JSON rather than the agent's structured schema. */
+export async function callProviderFreeform(
+  sel: ProviderSelection,
+  system: string,
+  user: string,
+): Promise<string> {
+  if (sel.provider === "anthropic") {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": sel.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: sel.model,
+        max_tokens: 2048,
+        system,
+        messages: [{ role: "user", content: user }],
+      }),
+    });
+    if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
+    const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
+    return data.content?.find((b) => b.type === "text")?.text ?? "";
+  }
+
+  // openai — plain text, not forced JSON
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${sel.apiKey}` },
+    body: JSON.stringify({
+      model: sel.model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`);
+  const data2 = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  return data2.choices?.[0]?.message?.content ?? "";
+}

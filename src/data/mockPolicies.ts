@@ -65,4 +65,17 @@ export const MOCK_POLICIES: Record<string, MockPolicy> = {
     vehicles: [{ year: 2020, make: "Mazda", model: "CX-5" }],
     coveragesSummary: ["Liability"],
   },
+  // Lapsed policy — Alex Chen's coverage has expired (Item 6).
+  // The agent must detect status:"lapsed" from lookupPolicy and refuse to open
+  // a claim, instead escalating to a representative for reinstatement options.
+  "POL-DEMO-6000": {
+    id: "POL-DEMO-6000",
+    customerId: "cust_006",
+    status: "lapsed",
+    lineOfBusiness: "Personal Auto",
+    effectiveDate: "2024-11-01",
+    expirationDate: "2025-11-01",
+    vehicles: [{ year: 2017, make: "Nissan", model: "Altima" }],
+    coveragesSummary: ["Liability", "Collision"],
+  },
 };

@@ -108,5 +108,6 @@ export function mapRunToLabView(
     overallScore: `${run.evaluation.totalScore}/${run.evaluation.maxScore}`,
     architectureNotes: scenario.architectureNotes,
     llmRun,
+    noiseEnabled: run.noiseEnabled,
   };
 }

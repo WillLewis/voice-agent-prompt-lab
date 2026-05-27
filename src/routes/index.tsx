@@ -3,17 +3,25 @@ import { useEffect, useMemo, useState } from "react";
 import { SCENARIOS } from "@/data/scenarios";
 import { runLab, runAllDeterministic } from "@/lab/run";
 import { INSURANCE_VOICE_AGENT_PROMPT } from "@/prompts/insuranceVoiceAgentPrompt";
-import type { LabView, ScenarioMeta } from "@/lab/types";
+import type { LabView, ScenarioMeta, CallerMode, CallerPersona } from "@/lab/types";
 import type { RunMode } from "@/engine/types";
 import { ScenarioList } from "@/components/lab/ScenarioList";
 import { TranscriptPanel } from "@/components/lab/TranscriptPanel";
 import { InspectorTabs } from "@/components/lab/InspectorTabs";
 import { NeutralBadge } from "@/components/lab/StatusBadge";
-import { Activity, Loader2 } from "lucide-react";
+import { Activity, Loader2, Volume2, VolumeX } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: Index,
 });
+
+const PERSONAS: { value: CallerPersona; label: string }[] = [
+  { value: "cooperative", label: "Cooperative" },
+  { value: "rushed", label: "Rushed" },
+  { value: "confused", label: "Confused" },
+  { value: "irate", label: "Irate" },
+  { value: "evasive-adversarial", label: "Adversarial" },
+];
 
 function Index() {
   const [views, setViews] = useState<Record<string, LabView>>({});
@@ -22,6 +30,11 @@ function Index() {
   const [prompt, setPrompt] = useState(INSURANCE_VOICE_AGENT_PROMPT);
   const [running, setRunning] = useState(false);
   const [llm, setLlm] = useState<{ available: boolean; provider?: string }>({ available: false });
+  // Item 1: adaptive caller controls
+  const [callerMode, setCallerMode] = useState<CallerMode>("scripted");
+  const [callerPersona, setCallerPersona] = useState<CallerPersona>("cooperative");
+  // Item 5: ASR noise toggle
+  const [noiseEnabled, setNoiseEnabled] = useState(false);
 
   // Seed the dashboard: run every scenario deterministically (instant, local).
   useEffect(() => {
@@ -60,15 +73,33 @@ function Index() {
 
   const activeView = views[activeId];
 
+  // Build the current-scores map for the Versions tab snapshot.
+  const currentScores = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const [id, view] of Object.entries(views)) {
+      out[id] = view.overallScore;
+    }
+    return out;
+  }, [views]);
+
   async function handleRun() {
     setRunning(true);
     try {
-      const v = await runLab(activeId, mode, prompt);
+      const v = await runLab(activeId, {
+        mode,
+        systemPrompt: prompt,
+        callerMode,
+        callerPersona,
+        noiseEnabled,
+      });
       setViews((prev) => ({ ...prev, [activeId]: v }));
     } finally {
       setRunning(false);
     }
   }
+
+  // Live caller requires LLM mode + key.
+  const callerAvailable = mode === "llm" && llm.available;
 
   return (
     <div className="flex h-screen flex-col bg-slate-100 text-slate-900">
@@ -84,8 +115,33 @@ function Index() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* Agent mode toggle */}
           <ModeToggle mode={mode} onChange={setMode} llmAvailable={llm.available} />
+          {/* Caller mode toggle (Item 1) */}
+          <CallerToggle
+            callerMode={callerMode}
+            onChange={setCallerMode}
+            available={callerAvailable}
+          />
+          {/* Persona dropdown (Item 1) */}
+          {callerMode === "live" && callerAvailable && (
+            <select
+              value={callerPersona}
+              onChange={(e) => setCallerPersona(e.target.value as CallerPersona)}
+              className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-300"
+            >
+              {PERSONAS.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
+          )}
+          {/* ASR noise toggle (Item 5) */}
+          <NoiseToggle
+            enabled={noiseEnabled}
+            onChange={setNoiseEnabled}
+            available={callerMode === "live" && callerAvailable}
+          />
           <NeutralBadge>
             engine: {mode === "llm" ? llm.provider ?? "llm" : "deterministic"}
           </NeutralBadge>
@@ -114,6 +170,7 @@ function Index() {
               edited={prompt !== INSURANCE_VOICE_AGENT_PROMPT}
               onPromptChange={setPrompt}
               onResetPrompt={() => setPrompt(INSURANCE_VOICE_AGENT_PROMPT)}
+              currentScores={currentScores}
             />
           </>
         ) : (
@@ -126,6 +183,10 @@ function Index() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Header controls
+// ---------------------------------------------------------------------------
+
 function ModeToggle({
   mode,
   onChange,
@@ -137,6 +198,7 @@ function ModeToggle({
 }) {
   const btn = (m: RunMode, label: string, disabled = false) => (
     <button
+      key={m}
       onClick={() => !disabled && onChange(m)}
       disabled={disabled}
       title={
@@ -158,5 +220,83 @@ function ModeToggle({
       {btn("deterministic", "Deterministic")}
       {btn("llm", "LLM", !llmAvailable)}
     </div>
+  );
+}
+
+/** Item 1: toggle between scripted and live caller. */
+function CallerToggle({
+  callerMode,
+  onChange,
+  available,
+}: {
+  callerMode: CallerMode;
+  onChange: (m: CallerMode) => void;
+  available: boolean;
+}) {
+  return (
+    <div
+      className="flex items-center gap-0.5 rounded-md bg-slate-100 p-0.5 ring-1 ring-inset ring-slate-200"
+      title="Caller mode: scripted = fixed lines; live = LLM-generated (requires LLM mode + key)"
+    >
+      <button
+        onClick={() => onChange("scripted")}
+        className={
+          callerMode === "scripted"
+            ? "rounded px-2 py-0.5 text-[11px] font-medium bg-white text-slate-900 shadow-sm"
+            : "rounded px-2 py-0.5 text-[11px] font-medium text-slate-500 hover:text-slate-700"
+        }
+      >
+        Scripted
+      </button>
+      <button
+        onClick={() => available && onChange("live")}
+        disabled={!available}
+        title={!available ? "Live caller requires LLM mode + an API key" : undefined}
+        className={
+          callerMode === "live"
+            ? "rounded px-2 py-0.5 text-[11px] font-medium bg-white text-slate-900 shadow-sm"
+            : "rounded px-2 py-0.5 text-[11px] font-medium text-slate-500 hover:text-slate-700 disabled:opacity-40"
+        }
+      >
+        Live caller
+      </button>
+    </div>
+  );
+}
+
+/** Item 5: ASR noise toggle — only meaningful with live caller. */
+function NoiseToggle({
+  enabled,
+  onChange,
+  available,
+}: {
+  enabled: boolean;
+  onChange: (v: boolean) => void;
+  available: boolean;
+}) {
+  return (
+    <button
+      onClick={() => available && onChange(!enabled)}
+      disabled={!available}
+      title={
+        !available
+          ? "ASR noise requires Live caller mode + LLM"
+          : enabled
+            ? "Disable ASR noise"
+            : "Enable ASR noise simulation (perturbs caller utterances)"
+      }
+      className={
+        enabled && available
+          ? "inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200"
+          : "inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500 opacity-60 hover:opacity-100 disabled:cursor-default"
+      }
+    >
+      {enabled && available ? (
+        <Volume2 className="size-3" />
+      ) : (
+        <VolumeX className="size-3" />
+      )}
+      Noise
+    </button>
   );
 }

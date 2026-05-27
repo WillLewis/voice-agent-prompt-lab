@@ -12,6 +12,7 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "eval": "tsx src/evals/runAll.ts",
+    "eval:llm": "tsx src/evals/runAllLlm.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

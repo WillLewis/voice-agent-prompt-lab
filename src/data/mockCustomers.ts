@@ -53,4 +53,13 @@ export const MOCK_CUSTOMERS: Record<string, MockCustomer> = {
     dateOfBirth: "0000-00-00",
     verification: { fullName: "Unknown Caller", zip: "00000" },
   },
+  // Lapsed-policy scenario: Alex Chen's policy has lapsed (Item 6).
+  cust_006: {
+    id: "cust_006",
+    fullName: "Alex Chen",
+    policyId: "POL-DEMO-6000",
+    zip: "77002",
+    dateOfBirth: "1991-09-14",
+    verification: { fullName: "Alex Chen", zip: "77002" },
+  },
 };

@@ -114,26 +114,40 @@ function parseOutput(content: string): AgentOutput | null {
   }
 }
 
-export function makeLlmAgent(systemPrompt: string): Agent {
+/** Transport: takes the system + user prompts and returns the model's raw text
+ *  (the structured JSON string). Lets the same agent run over the browser dev
+ *  proxy OR a direct provider call in the CLI eval. */
+export type ModelCaller = (system: string, user: string) => Promise<string>;
+
+/** Core LLM agent. The model's output is Zod-validated; on ANY error (network,
+ *  bad JSON, schema mismatch) it falls back to the deterministic agent, tagged
+ *  "fallback" so the UI/CLI can surface that this turn is the script, not the
+ *  live model. Shared by the browser and the CLI eval runner. */
+export function makeAgentWithCaller(systemPrompt: string, call: ModelCaller): Agent {
   return async (ctx: AgentContext): Promise<AgentOutput> => {
     try {
-      const res = await fetch("/api/llm", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ system: systemPrompt, user: buildUserPrompt(ctx) }),
-      });
-      if (!res.ok) throw new Error(`llm proxy responded ${res.status}`);
-      const data = (await res.json()) as { content?: string };
-      const parsed = data.content ? parseOutput(data.content) : null;
+      const content = await call(systemPrompt, buildUserPrompt(ctx));
+      const parsed = content ? parseOutput(content) : null;
       if (parsed) return { ...parsed, source: "llm" };
       throw new Error("LLM returned no valid structured output");
     } catch {
-      // Graceful fallback keeps the demo reliable even if the model misbehaves —
-      // but we tag the turn as "fallback" so the UI can show that this turn is
-      // the deterministic script, not the live model. A silent fallback would
-      // otherwise hide a rejected/non-conforming model response.
       const fallback = await deterministicAgent(ctx);
       return { ...fallback, source: "fallback" };
     }
   };
+}
+
+/** Browser agent: calls the local /api/llm proxy so the API key stays
+ *  server-side. */
+export function makeLlmAgent(systemPrompt: string): Agent {
+  return makeAgentWithCaller(systemPrompt, async (system, user) => {
+    const res = await fetch("/api/llm", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ system, user }),
+    });
+    if (!res.ok) throw new Error(`llm proxy responded ${res.status}`);
+    const data = (await res.json()) as { content?: string };
+    return data.content ?? "";
+  });
 }
