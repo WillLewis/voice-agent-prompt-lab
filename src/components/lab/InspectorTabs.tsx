@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { LabView, ToolCallView, PromptVersion, RunAllSummary } from "@/lab/types";
+import type { LabView, ToolCallView, PromptVersion, RunAllSummary, PromptVersionLabel } from "@/lab/types";
 import {
+  PROMPT_VERSION_LABELS,
   loadPromptVersions,
   savePromptVersion,
   deletePromptVersion,
@@ -23,6 +24,10 @@ type InspectorProps = {
   onResetPrompt: () => void;
   /** All current scores by scenarioId — used to snapshot per-version scores. */
   currentScores?: Record<string, string>;
+  /** Baseline score snapshot used for prompt-version deltas. */
+  baselineScores?: Record<string, string>;
+  /** Baseline prompt used for inspectable prompt diffs. */
+  baselinePrompt: string;
   /** Most recent Run All result, used to compare the full suite before/after. */
   runAllSummary?: RunAllSummary | null;
 };
@@ -35,6 +40,8 @@ export function InspectorTabs({
   onPromptChange,
   onResetPrompt,
   currentScores,
+  baselineScores,
+  baselinePrompt,
   runAllSummary,
 }: InspectorProps) {
   return (
@@ -73,6 +80,8 @@ export function InspectorTabs({
             <VersionsView
               prompt={prompt}
               currentScores={currentScores}
+              baselineScores={baselineScores}
+              baselinePrompt={baselinePrompt}
               onLoadPrompt={onPromptChange}
             />
           </TabsContent>
@@ -303,6 +312,11 @@ function RunAllComparison({ summary }: { summary: RunAllSummary }) {
           <div className="mt-0.5 text-[11.5px] text-slate-500">
             {summary.runLabel} · {ranAt}
           </div>
+          {summary.baselineDelta !== undefined && (
+            <div className={cn("mt-1 font-mono text-[11px]", deltaClass(summary.baselineDelta))}>
+              {formatBaselineDelta(summary.baselineDelta)} vs {summary.baselineLabel}
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-1">
           <NeutralBadge>{summary.passCount} pass</NeutralBadge>
@@ -339,6 +353,11 @@ function RunAllComparison({ summary }: { summary: RunAllSummary }) {
                 <td className="px-2.5 py-2">
                   <div className="font-mono text-[11.5px] text-slate-800">{row.afterScore}</div>
                   <EvalBadge status={row.afterStatus} />
+                  {row.baselineDelta !== undefined && (
+                    <div className={cn("mt-1 font-mono text-[10.5px]", deltaClass(row.baselineDelta))}>
+                      {formatBaselineDelta(row.baselineDelta)} baseline
+                    </div>
+                  )}
                 </td>
                 <td className="px-2.5 py-2">
                   <IssueSummary
@@ -395,6 +414,12 @@ function formatDelta(delta?: number): string {
   if (delta === undefined) return "baseline";
   if (delta === 0) return "no change";
   return delta > 0 ? `+${delta}` : String(delta);
+}
+
+function formatBaselineDelta(delta?: number): string {
+  if (delta === undefined) return "Δ --";
+  if (delta === 0) return "Δ 0";
+  return delta > 0 ? `Δ +${delta}` : `Δ ${delta}`;
 }
 
 function deltaClass(delta?: number): string {
@@ -521,15 +546,34 @@ function JudgeStatusIcon({ status }: { status: "pass" | "warn" | "fail" }) {
 function VersionsView({
   prompt,
   currentScores,
+  baselineScores,
+  baselinePrompt,
   onLoadPrompt,
 }: {
   prompt: string;
   currentScores?: Record<string, string>;
+  baselineScores?: Record<string, string>;
+  baselinePrompt: string;
   onLoadPrompt: (p: string) => void;
 }) {
   const [versions, setVersions] = useState<PromptVersion[]>(() => loadPromptVersions());
   const [newName, setNewName] = useState("");
-  const [diffTarget, setDiffTarget] = useState<PromptVersion | null>(null);
+  const [selectedLabels, setSelectedLabels] = useState<PromptVersionLabel[]>(["candidate"]);
+  const [diffTarget, setDiffTarget] = useState<PromptVersion | "baseline" | null>("baseline");
+  const builtinBaseline: PromptVersion = {
+    name: "Built-in baseline",
+    labels: ["baseline"],
+    prompt: baselinePrompt,
+    savedAt: "",
+    scores: baselineScores,
+  };
+  const savedBaseline = versions.find((v) => (v.labels ?? []).includes("baseline"));
+  const baselineVersion = savedBaseline ?? builtinBaseline;
+  const baselineScoreSnapshot = baselineVersion.scores ?? baselineScores;
+  const currentSummary = summarizeScoreSnapshot(currentScores);
+  const currentDelta = scoreSnapshotDelta(currentScores, baselineScoreSnapshot);
+  const selectedDiffTarget = diffTarget === "baseline" ? baselineVersion : diffTarget;
+  const diff = selectedDiffTarget ? diffPrompts(selectedDiffTarget.prompt, prompt) : null;
 
   function refresh() {
     setVersions(loadPromptVersions());
@@ -539,6 +583,7 @@ function VersionsView({
     const name = newName.trim() || `v${versions.length + 1}`;
     savePromptVersion({
       name,
+      labels: selectedLabels,
       prompt,
       savedAt: new Date().toISOString(),
       scores: currentScores,
@@ -549,7 +594,7 @@ function VersionsView({
 
   function handleDelete(name: string) {
     deletePromptVersion(name);
-    if (diffTarget?.name === name) setDiffTarget(null);
+    if (diffTarget !== "baseline" && diffTarget?.name === name) setDiffTarget("baseline");
     refresh();
   }
 
@@ -558,10 +603,14 @@ function VersionsView({
   }
 
   function handleToggleDiff(v: PromptVersion) {
-    setDiffTarget((prev) => (prev?.name === v.name ? null : v));
+    setDiffTarget((prev) => (prev !== "baseline" && prev?.name === v.name ? null : v));
   }
 
-  const diff = diffTarget ? diffPrompts(diffTarget.prompt, prompt) : null;
+  function toggleLabel(label: PromptVersionLabel) {
+    setSelectedLabels((prev) =>
+      prev.includes(label) ? prev.filter((item) => item !== label) : [...prev, label],
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -569,23 +618,71 @@ function VersionsView({
         <SectionTitle>Prompt versions</SectionTitle>
       </div>
 
+      <div className="rounded-lg border border-slate-200 bg-white p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[13px] font-medium text-slate-900">Current prompt</span>
+              {selectedLabels.map((label) => (
+                <PromptLabelPill key={label} label={label} />
+              ))}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <ScoreSnapshotBadge summary={currentSummary} />
+              <ScoreDeltaBadge delta={currentDelta} />
+            </div>
+          </div>
+          <button
+            onClick={() => setDiffTarget("baseline")}
+            className={cn(
+              "inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium",
+              diffTarget === "baseline"
+                ? "border-slate-300 bg-slate-100 text-slate-800"
+                : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50",
+            )}
+          >
+            <GitCompare className="size-3" />
+            Baseline diff
+          </button>
+        </div>
+      </div>
+
       {/* Save current */}
-      <div className="flex items-center gap-2">
-        <input
-          type="text"
-          placeholder="Version name (e.g. v1-strict-guardrails)"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSave()}
-          className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
-        />
-        <button
-          onClick={handleSave}
-          className="inline-flex shrink-0 items-center gap-1 rounded-md bg-slate-900 px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-slate-800"
-        >
-          <Save className="size-3" />
-          Save
-        </button>
+      <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="Version name (e.g. v2-coverage-guardrail)"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSave()}
+            className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
+          />
+          <button
+            onClick={handleSave}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md bg-slate-900 px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-slate-800"
+          >
+            <Save className="size-3" />
+            Save
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {PROMPT_VERSION_LABELS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => toggleLabel(item.id)}
+              className={cn(
+                "rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+                selectedLabels.includes(item.id)
+                  ? labelClass(item.id)
+                  : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50",
+              )}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Version list */}
@@ -600,14 +697,25 @@ function VersionsView({
               key={v.name}
               className={cn(
                 "rounded-lg border bg-white p-3",
-                diffTarget?.name === v.name ? "border-slate-400 ring-1 ring-slate-300" : "border-slate-200",
+                diffTarget !== "baseline" && diffTarget?.name === v.name
+                  ? "border-slate-400 ring-1 ring-slate-300"
+                  : "border-slate-200",
               )}
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="truncate text-[13px] font-medium text-slate-900">{v.name}</div>
-                  <div className="text-[11px] text-slate-400">
-                    {new Date(v.savedAt).toLocaleString()}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="truncate text-[13px] font-medium text-slate-900">{v.name}</span>
+                    {(v.labels ?? []).map((label) => (
+                      <PromptLabelPill key={label} label={label} />
+                    ))}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] text-slate-400">
+                      {new Date(v.savedAt).toLocaleString()}
+                    </span>
+                    <ScoreSnapshotBadge summary={summarizeScoreSnapshot(v.scores)} />
+                    <ScoreDeltaBadge delta={scoreSnapshotDelta(v.scores, baselineScoreSnapshot)} />
                   </div>
                   {v.scores && Object.keys(v.scores).length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1">
@@ -628,7 +736,7 @@ function VersionsView({
                     title="Compare with current"
                     className={cn(
                       "rounded p-1 text-[11px]",
-                      diffTarget?.name === v.name
+                      diffTarget !== "baseline" && diffTarget?.name === v.name
                         ? "bg-slate-200 text-slate-800"
                         : "text-slate-400 hover:bg-slate-100 hover:text-slate-700",
                     )}
@@ -657,29 +765,152 @@ function VersionsView({
       )}
 
       {/* Diff view */}
-      {diff && diffTarget && (
-        <div className="space-y-2">
-          <SectionTitle>Diff — {diffTarget.name} → current</SectionTitle>
-          <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white">
-            {diff.map((line, i) => (
-              <div
-                key={i}
-                className={cn(
-                  "px-3 py-0.5 font-mono text-[11px] leading-relaxed",
-                  line.type === "added" && "bg-emerald-50 text-emerald-800",
-                  line.type === "removed" && "bg-rose-50 text-rose-800 line-through opacity-70",
-                  line.type === "equal" && "text-slate-500",
-                )}
-              >
-                {line.type === "added" ? "+ " : line.type === "removed" ? "- " : "  "}
-                {line.line || " "}
-              </div>
-            ))}
-          </div>
-        </div>
+      {diff && selectedDiffTarget && (
+        <PromptDiffView
+          title={`Diff — ${selectedDiffTarget.name} -> current`}
+          diff={diff}
+        />
       )}
     </div>
   );
+}
+
+function PromptLabelPill({ label }: { label: PromptVersionLabel }) {
+  const meta = PROMPT_VERSION_LABELS.find((item) => item.id === label);
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded px-1.5 py-px text-[10px] font-medium ring-1 ring-inset",
+        labelClass(label),
+      )}
+    >
+      {meta?.label ?? label}
+    </span>
+  );
+}
+
+function labelClass(label: PromptVersionLabel): string {
+  if (label === "baseline") return "bg-slate-100 text-slate-700 ring-slate-200";
+  if (label === "regression") return "bg-rose-50 text-rose-700 ring-rose-200";
+  if (label === "fix") return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+  return "bg-sky-50 text-sky-700 ring-sky-200";
+}
+
+function ScoreSnapshotBadge({
+  summary,
+}: {
+  summary: { display: string; available: boolean };
+}) {
+  return (
+    <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-px font-mono text-[10px] text-slate-600">
+      score {summary.display}
+    </span>
+  );
+}
+
+function ScoreDeltaBadge({ delta }: { delta?: number }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded px-1.5 py-px font-mono text-[10px]",
+        delta === undefined
+          ? "bg-slate-100 text-slate-400"
+          : delta < 0
+            ? "bg-rose-50 text-rose-700"
+            : delta > 0
+              ? "bg-emerald-50 text-emerald-700"
+              : "bg-slate-100 text-slate-600",
+      )}
+    >
+      {formatBaselineDelta(delta)}
+    </span>
+  );
+}
+
+function PromptDiffView({
+  title,
+  diff,
+}: {
+  title: string;
+  diff: ReturnType<typeof diffPrompts>;
+}) {
+  const added = diff.filter((line) => line.type === "added").length;
+  const removed = diff.filter((line) => line.type === "removed").length;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <SectionTitle>{title}</SectionTitle>
+        <div className="flex items-center gap-1">
+          <NeutralBadge>+{added}</NeutralBadge>
+          <NeutralBadge>-{removed}</NeutralBadge>
+        </div>
+      </div>
+      <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+        {diff.map((line, i) => (
+          <div
+            key={`${line.type}-${line.oldLine ?? "-"}-${line.newLine ?? "-"}-${i}`}
+            className={cn(
+              "grid grid-cols-[3.25rem_1rem_minmax(0,1fr)] gap-2 px-2.5 py-0.5 font-mono text-[11px] leading-relaxed",
+              line.type === "added" && "bg-emerald-50 text-emerald-800",
+              line.type === "removed" && "bg-rose-50 text-rose-800",
+              line.type === "equal" && "text-slate-500",
+            )}
+          >
+            <span className="select-none text-right text-slate-400">
+              {line.oldLine ?? line.newLine ?? ""}
+            </span>
+            <span className="select-none">
+              {line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}
+            </span>
+            <span className={cn("min-w-0 whitespace-pre-wrap", line.type === "removed" && "line-through opacity-75")}>
+              {line.line || " "}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function summarizeScoreSnapshot(scores?: Record<string, string>): {
+  score: number;
+  max: number;
+  display: string;
+  available: boolean;
+} {
+  if (!scores || Object.keys(scores).length === 0) {
+    return { score: 0, max: 0, display: "not run", available: false };
+  }
+
+  let score = 0;
+  let max = 0;
+  for (const value of Object.values(scores)) {
+    const [scoreRaw, maxRaw] = value.split("/");
+    score += Number.parseFloat(scoreRaw) || 0;
+    max += Number.parseFloat(maxRaw) || 0;
+  }
+
+  return {
+    score,
+    max,
+    display: `${formatNumber(score)}/${formatNumber(max)}`,
+    available: true,
+  };
+}
+
+function scoreSnapshotDelta(
+  scores?: Record<string, string>,
+  baselineScores?: Record<string, string>,
+): number | undefined {
+  const current = summarizeScoreSnapshot(scores);
+  const baseline = summarizeScoreSnapshot(baselineScores);
+  if (!current.available || !baseline.available) return undefined;
+  return current.score - baseline.score;
+}
+
+function formatNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function ArchitectureNotes({ view }: { view: LabView }) {

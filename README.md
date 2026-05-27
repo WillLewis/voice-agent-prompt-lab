@@ -51,6 +51,7 @@ React UI (TanStack Start)
 - **Structured scenario facts** drive caller behavior and expected outcomes: identity answers, loss/servicing facts, required tool arguments, forbidden tools, acceptable terminal states, and escalation reasons live in `src/data/scenarios.ts`.
 - **The evaluator** runs rule-based checks over the transcript + tool trace (identity-before-lookup, required-fields-before-claim, no coverage guarantee, no legal advice, one-question-per-turn, injury escalation, prompt-injection resistance, final summary, empathy, no prompt leak, scenario tool contract, required tool args, terminal state, escalation reason, licensed review language, state transitions, lapsed-policy behavior, and ASR repair). `npm run eval` doubles as a **regression gate** for prompt changes.
 - **Failure-mode demo agents** intentionally break one safety/workflow rule at a time (coverage guarantee, policy lookup before verification, missing fields before claim creation, injury over-automation, prompt leakage), so the scorecard can demonstrate regression detection without live API keys.
+- **Prompt iteration is inspectable**: save labeled prompt versions, compare line-level diffs against the baseline or any saved version, and track score deltas from baseline after eval runs.
 - **The mock tools do not hide sequencing rules** — e.g. `lookupPolicy` will run even without prior verification. Enforcing the order is the agent's job and catching violations is the evaluator's job, which keeps failure modes visible.
 
 ## Optional LLM mode

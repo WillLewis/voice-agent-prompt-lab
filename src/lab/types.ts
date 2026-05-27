@@ -72,6 +72,8 @@ export interface ScenarioMeta {
 export interface RunAllComparisonRow {
   scenarioId: string;
   title: string;
+  baselineScore?: string;
+  baselineDelta?: number;
   beforeScore?: string;
   afterScore: string;
   scoreDelta?: number;
@@ -84,7 +86,9 @@ export interface RunAllComparisonRow {
 export interface RunAllSummary {
   ranAt: string;
   runLabel: string;
+  baselineLabel: string;
   totalScore: string;
+  baselineDelta?: number;
   passCount: number;
   warnCount: number;
   failCount: number;
@@ -101,9 +105,22 @@ export type CallerMode = "scripted" | "simulated" | "live";
 // Prompt versioning (Item 4)
 // ---------------------------------------------------------------------------
 
+export type PromptVersionLabel = "baseline" | "candidate" | "regression" | "fix";
+
+export const PROMPT_VERSION_LABELS: Array<{
+  id: PromptVersionLabel;
+  label: string;
+}> = [
+  { id: "baseline", label: "Baseline" },
+  { id: "candidate", label: "Candidate" },
+  { id: "regression", label: "Regression" },
+  { id: "fix", label: "Fix" },
+];
+
 /** A saved snapshot of a named prompt and its eval score at save time. */
 export interface PromptVersion {
   name: string;
+  labels?: PromptVersionLabel[];
   prompt: string;
   savedAt: string; // ISO timestamp
   /** Scorecard snapshot at save time (overallScore per scenario). */
@@ -123,11 +140,19 @@ export function loadPromptVersions(): PromptVersion[] {
 
 export function savePromptVersion(version: PromptVersion): void {
   const versions = loadPromptVersions();
+  const labels = version.labels ?? [];
   // Replace if name already exists, otherwise prepend.
   const idx = versions.findIndex((v) => v.name === version.name);
-  if (idx >= 0) versions[idx] = version;
-  else versions.unshift(version);
-  localStorage.setItem(PROMPT_VERSIONS_KEY, JSON.stringify(versions));
+  const normalized = { ...version, labels };
+  const next = labels.includes("baseline")
+    ? versions.map((v) => ({
+        ...v,
+        labels: (v.labels ?? []).filter((label) => label !== "baseline"),
+      }))
+    : versions;
+  if (idx >= 0) next[idx] = normalized;
+  else next.unshift(normalized);
+  localStorage.setItem(PROMPT_VERSIONS_KEY, JSON.stringify(next));
 }
 
 export function deletePromptVersion(name: string): void {
@@ -139,22 +164,50 @@ export function deletePromptVersion(name: string): void {
 export function diffPrompts(
   a: string,
   b: string,
-): Array<{ type: "equal" | "added" | "removed"; line: string }> {
+): Array<{ type: "equal" | "added" | "removed"; line: string; oldLine?: number; newLine?: number }> {
   const aLines = a.split("\n");
   const bLines = b.split("\n");
-  const result: Array<{ type: "equal" | "added" | "removed"; line: string }> = [];
+  const lengths = Array.from({ length: aLines.length + 1 }, () =>
+    Array<number>(bLines.length + 1).fill(0),
+  );
 
-  // Very fast O(n) approximation: mark removed lines then added lines.
-  // Good enough for prompt diffs which are usually sequential edits.
-  const aSet = new Set(aLines);
-  const bSet = new Set(bLines);
-
-  for (const line of aLines) {
-    if (bSet.has(line)) result.push({ type: "equal", line });
-    else result.push({ type: "removed", line });
+  for (let i = aLines.length - 1; i >= 0; i--) {
+    for (let j = bLines.length - 1; j >= 0; j--) {
+      lengths[i][j] =
+        aLines[i] === bLines[j]
+          ? lengths[i + 1][j + 1] + 1
+          : Math.max(lengths[i + 1][j], lengths[i][j + 1]);
+    }
   }
-  for (const line of bLines) {
-    if (!aSet.has(line)) result.push({ type: "added", line });
+
+  const result: Array<{
+    type: "equal" | "added" | "removed";
+    line: string;
+    oldLine?: number;
+    newLine?: number;
+  }> = [];
+  let i = 0;
+  let j = 0;
+  while (i < aLines.length && j < bLines.length) {
+    if (aLines[i] === bLines[j]) {
+      result.push({ type: "equal", line: aLines[i], oldLine: i + 1, newLine: j + 1 });
+      i += 1;
+      j += 1;
+    } else if (lengths[i + 1][j] >= lengths[i][j + 1]) {
+      result.push({ type: "removed", line: aLines[i], oldLine: i + 1 });
+      i += 1;
+    } else {
+      result.push({ type: "added", line: bLines[j], newLine: j + 1 });
+      j += 1;
+    }
+  }
+  while (i < aLines.length) {
+    result.push({ type: "removed", line: aLines[i], oldLine: i + 1 });
+    i += 1;
+  }
+  while (j < bLines.length) {
+    result.push({ type: "added", line: bLines[j], newLine: j + 1 });
+    j += 1;
   }
   return result;
 }

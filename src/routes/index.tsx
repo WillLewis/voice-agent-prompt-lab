@@ -39,12 +39,16 @@ function Index() {
   const [noiseEnabled, setNoiseEnabled] = useState(false);
   const [failureMode, setFailureMode] = useState<FailureModeId>("none");
   const [runAllSummary, setRunAllSummary] = useState<RunAllSummary | null>(null);
+  const [baselineScores, setBaselineScores] = useState<Record<string, string>>({});
 
   // Seed the dashboard: run every scenario deterministically (instant, local).
   useEffect(() => {
     let cancelled = false;
     runAllDeterministic().then((v) => {
-      if (!cancelled) setViews(v);
+      if (!cancelled) {
+        setViews(v);
+        setBaselineScores(scoresFromViews(v));
+      }
     });
     return () => {
       cancelled = true;
@@ -79,11 +83,7 @@ function Index() {
 
   // Build the current-scores map for the Versions tab snapshot.
   const currentScores = useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const [id, view] of Object.entries(views)) {
-      out[id] = view.overallScore;
-    }
-    return out;
+    return scoresFromViews(views);
   }, [views]);
 
   async function handleRun() {
@@ -108,7 +108,12 @@ function Index() {
       const next = await runAllLab(currentRunOptions());
       setViews(next);
       setRunAllSummary(
-        buildRunAllSummary(before, next, runLabel(mode, callerMode, failureMode, noiseEnabled)),
+        buildRunAllSummary(
+          before,
+          next,
+          baselineScores,
+          runLabel(mode, callerMode, failureMode, noiseEnabled),
+        ),
       );
     } finally {
       setRunningAll(false);
@@ -196,6 +201,8 @@ function Index() {
               onPromptChange={setPrompt}
               onResetPrompt={() => setPrompt(INSURANCE_VOICE_AGENT_PROMPT)}
               currentScores={currentScores}
+              baselineScores={baselineScores}
+              baselinePrompt={INSURANCE_VOICE_AGENT_PROMPT}
               runAllSummary={runAllSummary}
             />
           </>
@@ -212,10 +219,12 @@ function Index() {
 function buildRunAllSummary(
   before: Record<string, LabView>,
   after: Record<string, LabView>,
+  baselineScores: Record<string, string>,
   runLabelText: string,
 ): RunAllSummary {
   let score = 0;
   let maxScore = 0;
+  let baselineScore = 0;
   let passCount = 0;
   let warnCount = 0;
   let failCount = 0;
@@ -224,8 +233,11 @@ function buildRunAllSummary(
     const beforeView = before[scenario.id];
     const afterView = after[scenario.id];
     const afterScoreParts = parseScore(afterView.overallScore);
+    const baselineScoreText = baselineScores[scenario.id];
+    const baselineScoreParts = baselineScoreText ? parseScore(baselineScoreText) : undefined;
     score += afterScoreParts.score;
     maxScore += afterScoreParts.max;
+    baselineScore += baselineScoreParts?.score ?? 0;
 
     if (afterView.lastEval === "pass") passCount += 1;
     else if (afterView.lastEval === "warn") warnCount += 1;
@@ -237,6 +249,8 @@ function buildRunAllSummary(
     return {
       scenarioId: scenario.id,
       title: scenario.title,
+      baselineScore: baselineScoreText,
+      baselineDelta: baselineScoreParts ? afterScoreParts.score - baselineScoreParts.score : undefined,
       beforeScore: beforeView?.overallScore,
       afterScore: afterView.overallScore,
       scoreDelta,
@@ -254,12 +268,22 @@ function buildRunAllSummary(
   return {
     ranAt: new Date().toISOString(),
     runLabel: runLabelText,
+    baselineLabel: "Baseline",
     totalScore: `${trimScore(score)}/${trimScore(maxScore)}`,
+    baselineDelta: Object.keys(baselineScores).length > 0 ? score - baselineScore : undefined,
     passCount,
     warnCount,
     failCount,
     rows,
   };
+}
+
+function scoresFromViews(views: Record<string, LabView>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [id, view] of Object.entries(views)) {
+    out[id] = view.overallScore;
+  }
+  return out;
 }
 
 function parseScore(scoreText: string): { score: number; max: number } {
