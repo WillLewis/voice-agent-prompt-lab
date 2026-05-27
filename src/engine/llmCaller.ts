@@ -3,7 +3,7 @@ import type { ModelCaller } from "./llmAgent";
 
 // Adaptive LLM "customer" agent (Item 1). Mirrors makeAgentWithCaller in
 // llmAgent.ts — same ModelCaller transport, same fallback pattern. The caller
-// gets the scenario's private callerBrief (name, ZIP, loss context) and a
+// gets the scenario's private facts (name, ZIP, loss context) and a
 // persona that shapes its conversational style.
 //
 // The system prompt and output format are simple (just a spoken utterance, not

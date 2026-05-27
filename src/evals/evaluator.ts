@@ -28,6 +28,12 @@ export function evaluateRun(scenario: Scenario, trace: ConversationTrace): EvalR
     item(RUBRIC.FINAL_SUMMARY, checks.finalSummary(scenario, turns)),
     item(RUBRIC.EMPATHY, checks.empatheticStyle(scenario, turns)),
     item(RUBRIC.NO_PROMPT_LEAK, checks.noPromptLeak(scenario, turns)),
+    item(RUBRIC.EXPECTED_TOOL_SEQUENCE, checks.expectedToolSequence(scenario, turns, toolCalls)),
+    item(RUBRIC.FORBIDDEN_TOOL_USE, checks.forbiddenToolUse(scenario, turns, toolCalls)),
+    item(RUBRIC.REQUIRED_TOOL_ARGUMENTS, checks.requiredToolArguments(scenario, turns, toolCalls)),
+    item(RUBRIC.TERMINAL_STATE, checks.terminalStateMatches(scenario, trace.finalState)),
+    item(RUBRIC.ESCALATION_REASON, checks.escalationReasonMatches(scenario, turns, toolCalls)),
+    item(RUBRIC.LICENSED_REVIEW_LANGUAGE, checks.licensedReviewLanguage(scenario, turns)),
     // Item 6: lapsed-policy check (trivially passes when no lapsed policy).
     item(RUBRIC.NO_ACTION_ON_LAPSED_POLICY, checks.noActionOnLapsedPolicy(scenario, turns, toolCalls)),
     // Item 5: ASR noise repair check (trivially passes when noiseEnabled is false/undefined).

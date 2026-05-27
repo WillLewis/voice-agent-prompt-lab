@@ -98,8 +98,8 @@ function Index() {
     }
   }
 
-  // Live caller requires LLM mode + key.
-  const callerAvailable = mode === "llm" && llm.available;
+  // Live caller requires LLM mode + key; simulated caller is local and always available.
+  const liveCallerAvailable = mode === "llm" && llm.available;
 
   return (
     <div className="flex h-screen flex-col bg-slate-100 text-slate-900">
@@ -122,10 +122,10 @@ function Index() {
           <CallerToggle
             callerMode={callerMode}
             onChange={setCallerMode}
-            available={callerAvailable}
+            liveAvailable={liveCallerAvailable}
           />
           {/* Persona dropdown (Item 1) */}
-          {callerMode === "live" && callerAvailable && (
+          {(callerMode === "simulated" || (callerMode === "live" && liveCallerAvailable)) && (
             <select
               value={callerPersona}
               onChange={(e) => setCallerPersona(e.target.value as CallerPersona)}
@@ -140,7 +140,7 @@ function Index() {
           <NoiseToggle
             enabled={noiseEnabled}
             onChange={setNoiseEnabled}
-            available={callerMode === "live" && callerAvailable}
+            available={callerMode === "simulated" || (callerMode === "live" && liveCallerAvailable)}
           />
           <NeutralBadge>
             engine: {mode === "llm" ? llm.provider ?? "llm" : "deterministic"}
@@ -227,16 +227,16 @@ function ModeToggle({
 function CallerToggle({
   callerMode,
   onChange,
-  available,
+  liveAvailable,
 }: {
   callerMode: CallerMode;
   onChange: (m: CallerMode) => void;
-  available: boolean;
+  liveAvailable: boolean;
 }) {
   return (
     <div
       className="flex items-center gap-0.5 rounded-md bg-slate-100 p-0.5 ring-1 ring-inset ring-slate-200"
-      title="Caller mode: scripted = fixed lines; live = LLM-generated (requires LLM mode + key)"
+      title="Caller mode: scripted = fixed lines; simulated = local adaptive caller; live = LLM-generated"
     >
       <button
         onClick={() => onChange("scripted")}
@@ -249,9 +249,19 @@ function CallerToggle({
         Scripted
       </button>
       <button
-        onClick={() => available && onChange("live")}
-        disabled={!available}
-        title={!available ? "Live caller requires LLM mode + an API key" : undefined}
+        onClick={() => onChange("simulated")}
+        className={
+          callerMode === "simulated"
+            ? "rounded px-2 py-0.5 text-[11px] font-medium bg-white text-slate-900 shadow-sm"
+            : "rounded px-2 py-0.5 text-[11px] font-medium text-slate-500 hover:text-slate-700"
+        }
+      >
+        Simulated
+      </button>
+      <button
+        onClick={() => liveAvailable && onChange("live")}
+        disabled={!liveAvailable}
+        title={!liveAvailable ? "Live caller requires LLM mode + an API key" : undefined}
         className={
           callerMode === "live"
             ? "rounded px-2 py-0.5 text-[11px] font-medium bg-white text-slate-900 shadow-sm"
@@ -264,7 +274,7 @@ function CallerToggle({
   );
 }
 
-/** Item 5: ASR noise toggle — only meaningful with live caller. */
+/** Item 5: ASR noise toggle — only meaningful with an adaptive caller. */
 function NoiseToggle({
   enabled,
   onChange,
@@ -280,7 +290,7 @@ function NoiseToggle({
       disabled={!available}
       title={
         !available
-          ? "ASR noise requires Live caller mode + LLM"
+          ? "ASR noise requires Simulated or Live caller mode"
           : enabled
             ? "Disable ASR noise"
             : "Enable ASR noise simulation (perturbs caller utterances)"

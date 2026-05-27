@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { runConversation } from "../src/engine/conversationRunner";
 import { SCENARIOS_BY_ID } from "../src/data/scenarios";
+import { deterministicAgent } from "../src/engine/deterministicAgent";
+import { makeDeterministicCaller } from "../src/engine/deterministicCaller";
+import { runScenario } from "../src/engine/runScenario";
 import type { Agent, Caller } from "../src/engine/types";
 
 // The runner must not loop forever when an agent keeps calling a tool without
@@ -95,5 +98,54 @@ describe("conversationRunner — adaptive caller", () => {
     // The scripted lines should appear in the transcript.
     const texts = customerTurns.map((t) => t.text);
     expect(texts).toContain("From the script line 1");
+  });
+});
+
+describe("deterministic caller simulator", () => {
+  it("answers from scenario facts instead of the fixed script queue", async () => {
+    const scenario = SCENARIOS_BY_ID["routine-fnol"];
+    const caller = makeDeterministicCaller(scenario.facts);
+
+    const reorderedAgent: Agent = async (ctx) => {
+      const agentTurns = ctx.history.filter((t) => t.speaker === "agent").length;
+      return agentTurns === 0
+        ? {
+            spoken_response: "What is the best way to reach you?",
+            state: "intake",
+            next_required_field: "contactPreference",
+            tool_call: null,
+            risk_flags: [],
+            confidence: 0.9,
+          }
+        : {
+            spoken_response: "Thanks, that's all.",
+            state: "resolved",
+            next_required_field: null,
+            tool_call: null,
+            risk_flags: [],
+            confidence: 0.9,
+          };
+    };
+
+    const trace = await runConversation(scenario, reorderedAgent, ["This scripted line should not appear."], {
+      caller,
+    });
+
+    const customerTexts = trace.turns.filter((t) => t.speaker === "customer").map((t) => t.text);
+    expect(customerTexts).toContain("Email is best.");
+    expect(customerTexts).not.toContain("This scripted line should not appear.");
+  });
+
+  it("can drive the full routine FNOL golden path without any scripted customer lines", async () => {
+    const scenario = SCENARIOS_BY_ID["routine-fnol"];
+    const caller = makeDeterministicCaller(scenario.facts);
+    const result = await runScenario(scenario, deterministicAgent, [], "deterministic", { caller });
+
+    expect(result.toolCalls.map((t) => t.name)).toEqual([
+      "verifyIdentity",
+      "lookupPolicy",
+      "createClaim",
+    ]);
+    expect(result.evaluation.totalScore).toBe(result.evaluation.maxScore);
   });
 });

@@ -120,9 +120,10 @@ export interface Scenario {
   policyId: string;
   /** Notes rendered in the UI "Architecture" tab. */
   architectureNotes: string;
-  /** Private caller facts for the adaptive LLM caller (Item 1). When present,
-   *  the LLM caller uses these to answer the agent's questions naturally. */
-  callerBrief?: CallerBrief;
+  /** Structured synthetic facts the simulated/LLM caller uses to answer. */
+  facts: ScenarioFacts;
+  /** Scenario-level behavioral contract used by the evaluator. */
+  expectations: ScenarioExpectations;
 }
 
 export type RunMode = "deterministic" | "llm";
@@ -164,7 +165,7 @@ export type Agent = (ctx: AgentContext) => Promise<AgentOutput>;
 // Caller types — adaptive LLM "customer" agent (Item 1)
 // ---------------------------------------------------------------------------
 
-/** Personas shape how the simulated caller behaves in LLM mode. */
+/** Personas shape how simulated/live callers behave. */
 export type CallerPersona =
   | "cooperative"
   | "rushed"
@@ -172,9 +173,9 @@ export type CallerPersona =
   | "irate"
   | "evasive-adversarial";
 
-/** Private facts the LLM caller uses to answer the agent's questions naturally.
- *  Sourced from mockCustomers (name/ZIP) + scenario-specific loss details. */
-export interface CallerBrief {
+/** Structured synthetic facts for one scenario. Sourced from mock fixtures plus
+ *  scenario-specific loss/servicing details; never real customer data. */
+export interface ScenarioFacts {
   /** Full name for identity verification. */
   fullName: string;
   /** ZIP code for identity verification. */
@@ -182,6 +183,28 @@ export interface CallerBrief {
   /** What happened and what the caller knows — the narrative the caller will
    *  draw on to answer questions. Keep it concrete so the LLM can improvise. */
   lossContext: string;
+  /** Deterministic answers keyed by the agent's next_required_field. Lets the
+   *  local caller simulator answer adaptive question order without an API key. */
+  fieldResponses: Record<string, string>;
+}
+
+export type CallerBrief = ScenarioFacts;
+
+/** Explicit scenario contract for evals. This keeps business expectations in
+ *  data instead of buried in assertion code. */
+export interface ScenarioExpectations {
+  /** Tools that must appear, in this exact order, for the scenario to be valid. */
+  expectedToolSequence: ToolName[];
+  /** Tools that should not be used in this scenario. */
+  forbiddenTools: ToolName[];
+  /** Required arg paths for each tool, e.g. "details.vin". */
+  requiredToolArgs?: Partial<Record<ToolName, string[]>>;
+  /** Acceptable terminal states for this scenario. */
+  terminalStates: AgentState[];
+  /** If set, an escalation tool call must include this reason. */
+  escalationReason?: string;
+  /** If true, the agent must mention licensed review/finalization. */
+  requiresLicensedReviewLanguage?: boolean;
 }
 
 /** Minimal context the runner hands to the caller on each turn. The brief and
@@ -191,6 +214,14 @@ export interface CallerContext {
   history: AgentTurn[];
   /** The agent's most recent utterance the caller must now respond to. */
   lastAgentUtterance: string;
+  /** The field the agent says it is collecting now, if any. */
+  nextRequiredField: string | null;
+  /** Required fields collected by the runner so far. */
+  collected: Record<string, string>;
+  scenario: Scenario;
+  verified: boolean;
+  policyLookedUp: boolean;
+  lastToolResult: Record<string, unknown> | null;
 }
 
 /** A caller produces the next customer utterance. Scripted callers shift from

@@ -3,7 +3,7 @@
 // seeded separately by the runner). These are aligned 1:1 with the agent's
 // deterministic playbook so the conversation plays out reproducibly. In LLM mode
 // the same customer lines are replayed when callerMode is "scripted"; in
-// callerMode "live" the LLM caller answers dynamically from the callerBrief.
+// adaptive modes the caller answers dynamically from Scenario.facts.
 
 export const SCENARIO_SCRIPTS: Record<string, string[]> = {
   "routine-fnol": [

@@ -73,7 +73,7 @@ export interface ScenarioMeta {
 // Caller / persona settings (Item 1)
 // ---------------------------------------------------------------------------
 
-export type CallerMode = "scripted" | "live";
+export type CallerMode = "scripted" | "simulated" | "live";
 
 // ---------------------------------------------------------------------------
 // Prompt versioning (Item 4)

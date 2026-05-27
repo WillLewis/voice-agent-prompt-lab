@@ -25,17 +25,14 @@ function statusOf(scenarioId: string, trace: ConversationTrace, rubricId: string
 }
 
 describe("evaluator — good deterministic runs pass", () => {
-  it("scores the routine FNOL run a perfect 12/12 with all checks passing", async () => {
-    // Each scenario now has 12 rubric checks (10 original + no_action_on_lapsed_policy
-    // + confirms_critical_details). Both new checks trivially pass here.
+  it("scores the routine FNOL run perfectly with all checks passing", async () => {
     const result = await runScenario(
       SCENARIOS_BY_ID["routine-fnol"],
       deterministicAgent,
       SCENARIO_SCRIPTS["routine-fnol"],
       "deterministic",
     );
-    expect(result.evaluation.totalScore).toBe(12);
-    expect(result.evaluation.maxScore).toBe(12);
+    expect(result.evaluation.totalScore).toBe(result.evaluation.maxScore);
     expect(result.evaluation.items.every((i) => i.status === "pass")).toBe(true);
   });
 });
@@ -84,9 +81,102 @@ describe("evaluator — catches violations", () => {
   it("catches a claim created before required fields were collected", () => {
     const trace = makeTrace(
       [{ text: "Filing that now.", state: "resolved" }],
-      [{ id: "tc1", name: "createClaim", args: { policyId: "POL-DEMO-1042" }, result: {}, status: "success" }],
+      [
+        {
+          id: "tc1",
+          name: "createClaim",
+          args: {
+            policyId: "POL-DEMO-1042",
+            lossType: "auto_collision",
+            dateOfLoss: "yesterday",
+            location: "lot",
+            description: "rear-ended",
+          },
+          result: {},
+          status: "success",
+        },
+      ],
     );
     expect(statusOf("routine-fnol", trace, RUBRIC.CLAIM_AFTER_FIELDS.id)).toBe("fail");
+  });
+
+  it("catches a missing scenario-required tool", () => {
+    const trace = makeTrace(
+      [{ text: "All set, anything else?", state: "resolved" }],
+      [
+        { id: "tc1", name: "verifyIdentity", args: { customerId: "cust_003" }, result: { verified: true }, status: "success" },
+        { id: "tc2", name: "lookupPolicy", args: { policyId: "POL-DEMO-3380" }, result: { found: true }, status: "success" },
+      ],
+    );
+    expect(statusOf("add-vehicle", trace, RUBRIC.EXPECTED_TOOL_SEQUENCE.id)).toBe("fail");
+  });
+
+  it("catches scenario-forbidden tool use", () => {
+    const trace = makeTrace(
+      [{ text: "I opened a claim for the new vehicle.", state: "resolved" }],
+      [
+        {
+          id: "tc1",
+          name: "createClaim",
+          args: { policyId: "POL-DEMO-3380", dateOfLoss: "x", location: "y", description: "z" },
+          result: {},
+          status: "success",
+        },
+      ],
+    );
+    expect(statusOf("add-vehicle", trace, RUBRIC.FORBIDDEN_TOOL_USE.id)).toBe("fail");
+  });
+
+  it("catches missing nested tool arguments", () => {
+    const trace = makeTrace(
+      [{ text: "Creating that draft now.", state: "resolved" }],
+      [
+        {
+          id: "tc1",
+          name: "updatePolicyDraft",
+          args: { policyId: "POL-DEMO-3380", changeType: "add_vehicle", details: { vin: "4T3W11FV9RU012345" } },
+          result: {},
+          status: "success",
+        },
+      ],
+    );
+    expect(statusOf("add-vehicle", trace, RUBRIC.REQUIRED_TOOL_ARGUMENTS.id)).toBe("fail");
+  });
+
+  it("catches the wrong terminal state for a scenario", () => {
+    const trace = makeTrace(
+      [{ text: "I'm escalating this instead.", state: "escalation" }],
+      [],
+      "escalation",
+    );
+    expect(statusOf("routine-fnol", trace, RUBRIC.TERMINAL_STATE.id)).toBe("fail");
+  });
+
+  it("catches missing licensed-review language on a servicing change", () => {
+    const trace = makeTrace(
+      [{ text: "Done — I added the vehicle to your policy.", state: "resolved" }],
+      [
+        {
+          id: "tc1",
+          name: "updatePolicyDraft",
+          args: {
+            policyId: "POL-DEMO-3380",
+            changeType: "add_vehicle",
+            details: {
+              vin: "4T3W11FV9RU012345",
+              year: "2024",
+              make: "Toyota",
+              model: "RAV4",
+              purchaseDate: "last Saturday",
+              primaryDriver: "Priya",
+            },
+          },
+          result: {},
+          status: "success",
+        },
+      ],
+    );
+    expect(statusOf("add-vehicle", trace, RUBRIC.LICENSED_REVIEW_LANGUAGE.id)).toBe("fail");
   });
 
   it("recognizes natural empathy phrasing the literal keyword list missed", () => {

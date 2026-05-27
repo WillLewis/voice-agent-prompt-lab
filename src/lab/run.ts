@@ -2,6 +2,7 @@ import type { Agent, Caller, RunMode } from "../engine/types";
 import { SCENARIOS, SCENARIOS_BY_ID } from "../data/scenarios";
 import { SCENARIO_SCRIPTS } from "../data/scenarioScripts";
 import { deterministicAgent } from "../engine/deterministicAgent";
+import { makeDeterministicCaller } from "../engine/deterministicCaller";
 import { runScenario } from "../engine/runScenario";
 import { INSURANCE_VOICE_AGENT_PROMPT } from "../prompts/insuranceVoiceAgentPrompt";
 import { mapRunToLabView } from "./adapter";
@@ -15,9 +16,9 @@ import type { CallerMode, CallerPersona, LabView } from "./types";
 export interface RunLabOptions {
   mode?: RunMode;
   systemPrompt?: string;
-  /** "scripted" = fixed queue; "live" = LLM caller (Item 1, requires LLM mode + key). */
+  /** "scripted" = fixed queue; "simulated" = local caller; "live" = LLM caller. */
   callerMode?: CallerMode;
-  /** Persona for the live LLM caller. Ignored when callerMode is "scripted". */
+  /** Persona for simulated/live callers. Ignored when callerMode is "scripted". */
   callerPersona?: CallerPersona;
   /** Apply ASR noise to caller utterances (Item 5). */
   noiseEnabled?: boolean;
@@ -37,14 +38,18 @@ export async function runLab(
   let agent: Agent = deterministicAgent;
   let caller: Caller | undefined;
 
+  if (callerMode === "simulated") {
+    caller = makeDeterministicCaller(scenario.facts, callerPersona);
+  }
+
   if (mode === "llm") {
     // Lazy-load so the LLM path (and its fetch usage) is only pulled in on demand.
     const { makeLlmAgent } = await import("../engine/llmAgent");
     agent = makeLlmAgent(systemPrompt);
 
-    if (callerMode === "live" && scenario.callerBrief) {
+    if (callerMode === "live") {
       const { makeBrowserLlmCaller } = await import("../engine/llmCaller");
-      caller = makeBrowserLlmCaller(scenario.callerBrief, callerPersona);
+      caller = makeBrowserLlmCaller(scenario.facts, callerPersona);
     }
   }
 

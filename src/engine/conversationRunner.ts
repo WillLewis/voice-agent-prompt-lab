@@ -116,9 +116,18 @@ export async function runConversation(
     let next: string | undefined;
 
     if (caller) {
-      // Live LLM caller: generate the customer's next utterance.
+      // Adaptive caller: generate the customer's next utterance.
       const lastAgent = agentTurn.text;
-      const callerCtx: CallerContext = { history: turns, lastAgentUtterance: lastAgent };
+      const callerCtx: CallerContext = {
+        history: turns,
+        lastAgentUtterance: lastAgent,
+        nextRequiredField: output.next_required_field,
+        collected,
+        scenario,
+        verified,
+        policyLookedUp,
+        lastToolResult,
+      };
       const result = await caller(callerCtx);
       if (result.end || !result.utterance.trim()) break;
       next = result.utterance;
