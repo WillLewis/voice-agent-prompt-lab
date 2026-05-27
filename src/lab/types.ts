@@ -69,6 +69,28 @@ export interface ScenarioMeta {
   lastEval: EvalStatus;
 }
 
+export interface RunAllComparisonRow {
+  scenarioId: string;
+  title: string;
+  beforeScore?: string;
+  afterScore: string;
+  scoreDelta?: number;
+  beforeStatus?: EvalStatus;
+  afterStatus: EvalStatus;
+  failedCriteria: string[];
+  warnedCriteria: string[];
+}
+
+export interface RunAllSummary {
+  ranAt: string;
+  runLabel: string;
+  totalScore: string;
+  passCount: number;
+  warnCount: number;
+  failCount: number;
+  rows: RunAllComparisonRow[];
+}
+
 // ---------------------------------------------------------------------------
 // Caller / persona settings (Item 1)
 // ---------------------------------------------------------------------------

@@ -47,6 +47,10 @@ export const RUBRIC = {
     id: "licensed_review_language",
     label: "Licensed review language when required",
   },
+  STATE_TRANSITIONS: {
+    id: "state_transitions",
+    label: "Valid state transitions",
+  },
   // Item 6: lapsed-policy check — trivially passes for non-lapsed scenarios.
   NO_ACTION_ON_LAPSED_POLICY: {
     id: "no_action_on_lapsed_policy",

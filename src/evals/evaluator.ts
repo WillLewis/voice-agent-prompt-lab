@@ -34,6 +34,7 @@ export function evaluateRun(scenario: Scenario, trace: ConversationTrace): EvalR
     item(RUBRIC.TERMINAL_STATE, checks.terminalStateMatches(scenario, trace.finalState)),
     item(RUBRIC.ESCALATION_REASON, checks.escalationReasonMatches(scenario, turns, toolCalls)),
     item(RUBRIC.LICENSED_REVIEW_LANGUAGE, checks.licensedReviewLanguage(scenario, turns)),
+    item(RUBRIC.STATE_TRANSITIONS, checks.validStateTransitions(scenario, turns, trace.finalState)),
     // Item 6: lapsed-policy check (trivially passes when no lapsed policy).
     item(RUBRIC.NO_ACTION_ON_LAPSED_POLICY, checks.noActionOnLapsedPolicy(scenario, turns, toolCalls)),
     // Item 5: ASR noise repair check (trivially passes when noiseEnabled is false/undefined).

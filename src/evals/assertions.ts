@@ -1,4 +1,5 @@
 import type { AgentState, AgentTurn, EvalStatus, Scenario, ToolCall, ToolName } from "../engine/types";
+import { canTransition } from "../engine/stateMachine";
 
 // Pure, rule-based assertions over a finished run. Each returns a status +
 // human-readable rationale. They inspect the transcript text, the tool trace,
@@ -371,6 +372,36 @@ export function licensedReviewLanguage(
     return pass("Explained licensed review/finalization for the policy change.");
   }
   return fail("Policy servicing scenario did not clearly mention licensed review/finalization.");
+}
+
+export function validStateTransitions(
+  _scenario: Scenario,
+  turns: AgentTurn[],
+  finalState: AgentState,
+): AssertionResult {
+  const states = turns
+    .filter((turn) => turn.speaker === "agent" && turn.state)
+    .map((turn) => turn.state as AgentState);
+
+  if (states.length === 0) return fail("No agent states were emitted.");
+  if (states[0] !== "greeting") {
+    return fail(`First agent state was ${states[0]}; expected greeting.`);
+  }
+
+  for (let i = 1; i < states.length; i += 1) {
+    const from = states[i - 1];
+    const to = states[i];
+    if (from === to) continue;
+    if (!canTransition(from, to)) {
+      return fail(`Illegal state transition: ${from} → ${to}.`);
+    }
+  }
+
+  const last = states[states.length - 1];
+  if (last !== finalState) {
+    return fail(`Trace finalState is ${finalState}, but last agent state is ${last}.`);
+  }
+  return pass("Agent states followed the configured state machine.");
 }
 
 // --- Item 6: lapsed-policy check -------------------------------------------

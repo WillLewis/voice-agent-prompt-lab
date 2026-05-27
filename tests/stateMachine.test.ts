@@ -10,6 +10,11 @@ describe("state machine", () => {
     expect(canTransition("tool_call", "resolved")).toBe(true);
   });
 
+  it("allows coverage-boundary repair back through verification", () => {
+    expect(canTransition("greeting", "coverage_boundary")).toBe(true);
+    expect(canTransition("coverage_boundary", "identity_verification")).toBe(true);
+  });
+
   it("rejects illegal transitions", () => {
     expect(canTransition("greeting", "resolved")).toBe(false);
     expect(canTransition("resolved", "greeting")).toBe(false);

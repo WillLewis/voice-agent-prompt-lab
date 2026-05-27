@@ -152,6 +152,18 @@ describe("evaluator — catches violations", () => {
     expect(statusOf("routine-fnol", trace, RUBRIC.TERMINAL_STATE.id)).toBe("fail");
   });
 
+  it("catches illegal state transitions", () => {
+    const trace = makeTrace(
+      [
+        { text: "Hello.", state: "greeting" },
+        { text: "I'll submit that now.", state: "tool_call" },
+      ],
+      [],
+      "tool_call",
+    );
+    expect(statusOf("routine-fnol", trace, RUBRIC.STATE_TRANSITIONS.id)).toBe("fail");
+  });
+
   it("catches missing licensed-review language on a servicing change", () => {
     const trace = makeTrace(
       [{ text: "Done — I added the vehicle to your policy.", state: "resolved" }],

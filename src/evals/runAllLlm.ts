@@ -9,45 +9,93 @@ import { INSURANCE_VOICE_AGENT_PROMPT } from "../prompts/insuranceVoiceAgentProm
 import type { EvalStatus } from "../engine/types";
 
 // LLM eval runner (`npm run eval:llm`). Unlike `npm run eval` (which scores the
-// fixed deterministic golden transcripts and so CANNOT detect a prompt change),
-// this runs the CURRENT system prompt through the live model and scores its
-// actual behavior. It calls the provider directly (no dev server / /api/llm
-// proxy needed), so it works from CI.
+// fixed deterministic golden transcripts and so cannot detect a prompt change),
+// this runs the current system prompt through the live model and scores its
+// actual behavior. It calls the provider directly, so it does not need the Vite
+// dev server or a browser.
 //
 // Usage:
-//   npm run eval:llm                              # all scenarios, 1 sample
-//   npm run eval:llm -- injury-escalation         # one scenario, 1 sample
-//   npm run eval:llm -- --samples 5               # all scenarios, 5 samples each
-//   npm run eval:llm -- injury-escalation --samples 5 --threshold 0.8
-//   LPL_PROMPT_FILE=/tmp/p.txt npm run eval:llm   # eval a candidate prompt
+//   npm run eval:llm
+//   npm run eval:llm -- injury-escalation
+//   npm run eval:llm -- --samples 5
+//   npm run eval:llm -- injury-escalation --samples 5 --threshold 0.9
+//   npm run eval:llm -- --samples 5 --max-fallback-rate 0
+//   LPL_PROMPT_FILE=/tmp/p.txt npm run eval:llm
 //
-// --samples N     : run each scenario N times and report pass-rate per check
-// --threshold T   : exit non-zero if overall pass-rate is below T (0-1, default 0.5)
+// --samples N            Run each scenario N times.
+// --threshold T          Minimum weighted pass-rate per check and overall.
+//                        Pass=1, warn=0.5, fail=0. Default: 0.8.
+// --max-fallback-rate R  Maximum accepted live-model fallback rate. Default: 0.
 
 const SYMBOL: Record<EvalStatus, string> = { pass: "✓", warn: "⚠", fail: "✗" };
+const DEFAULT_THRESHOLD = 0.8;
+const DEFAULT_MAX_FALLBACK_RATE = 0;
 
-function parseArgs(argv: string[]): {
+type CliOptions = {
   scenarioIds: string[];
   samples: number;
   threshold: number;
-} {
+  maxFallbackRate: number;
+};
+
+type CriterionStats = {
+  label: string;
+  pass: number;
+  warn: number;
+  fail: number;
+  rationales: string[];
+};
+
+type ScenarioAggregate = {
+  title: string;
+  scoreSum: number;
+  maxScoreSum: number;
+  agentTurns: number;
+  fallbacks: number;
+  criterionOrder: string[];
+  criteria: Record<string, CriterionStats>;
+};
+
+function parseArgs(argv: string[]): CliOptions {
   const scenarioIds: string[] = [];
   let samples = 1;
-  let threshold = 0.5;
+  let threshold = DEFAULT_THRESHOLD;
+  let maxFallbackRate = DEFAULT_MAX_FALLBACK_RATE;
 
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--samples" && argv[i + 1]) {
-      samples = Math.max(1, parseInt(argv[++i], 10) || 1);
-    } else if (argv[i] === "--threshold" && argv[i + 1]) {
-      threshold = Math.max(0, Math.min(1, parseFloat(argv[++i]) || 0.5));
-    } else if (!argv[i].startsWith("--")) {
-      scenarioIds.push(argv[i]);
+    const arg = argv[i];
+    if (arg === "--") continue;
+    if (arg === "--samples" && argv[i + 1]) {
+      samples = Math.max(1, Number.parseInt(argv[++i], 10) || 1);
+    } else if (arg === "--threshold" && argv[i + 1]) {
+      threshold = parseBoundedRate(argv[++i], DEFAULT_THRESHOLD);
+    } else if (arg === "--max-fallback-rate" && argv[i + 1]) {
+      maxFallbackRate = parseBoundedRate(argv[++i], DEFAULT_MAX_FALLBACK_RATE);
+    } else if (arg.startsWith("--")) {
+      throw new Error(`Unknown option: ${arg}`);
+    } else {
+      scenarioIds.push(arg);
     }
   }
-  return { scenarioIds, samples, threshold };
+
+  return { scenarioIds, samples, threshold, maxFallbackRate };
+}
+
+function parseBoundedRate(raw: string, fallback: number): number {
+  const parsed = Number.parseFloat(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.min(1, parsed));
 }
 
 async function main(): Promise<void> {
+  let options: CliOptions;
+  try {
+    options = parseArgs(process.argv.slice(2));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(2);
+  }
+
   const sel = selectProvider(loadEnvKeys(process.cwd()));
   if (!sel) {
     console.error(
@@ -56,20 +104,15 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const { scenarioIds, samples, threshold } = parseArgs(process.argv.slice(2));
+  const { scenarioIds, samples, threshold, maxFallbackRate } = options;
 
-  // Show WHERE the key came from (value redacted). A real env var overrides the
-  // .dev.vars file, so a stale export can mask a good file key — and vice versa.
   const keyEnvVar = sel.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
   const keySource = process.env[keyEnvVar] ? "shell env (overrides .dev.vars)" : ".dev.vars file";
   console.log(`\n[eval:llm] provider=${sel.provider} model=${sel.model} · key source: ${keySource}`);
-  if (samples > 1) {
-    console.log(`[eval:llm] samples=${samples} per scenario · threshold=${threshold}`);
-  }
+  console.log(
+    `[eval:llm] samples=${samples} · threshold=${percent(threshold)} · max fallback=${percent(maxFallbackRate)}`,
+  );
 
-  // Preflight: surface the REAL provider error (bad key, no credits, rate limit,
-  // network) up front, instead of letting it hide behind the agent's silent
-  // per-turn fallback and surface only as a generic "model never reached".
   try {
     await callProvider(sel, "You are a connectivity check.", "Reply with the single word OK.");
   } catch (e) {
@@ -88,150 +131,197 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const scenarios =
-    scenarioIds.length > 0
-      ? scenarioIds.map((id) => SCENARIOS_BY_ID[id]).filter(Boolean)
-      : SCENARIOS;
-
-  if (scenarioIds.length > 0 && scenarios.length === 0) {
+  const unknownScenarioIds = scenarioIds.filter((id) => !SCENARIOS_BY_ID[id]);
+  if (unknownScenarioIds.length > 0) {
     console.error(
-      `Unknown scenario id(s): ${scenarioIds.join(", ")}. Known: ${SCENARIOS.map((s) => s.id).join(", ")}`,
+      `Unknown scenario id(s): ${unknownScenarioIds.join(", ")}. Known: ${SCENARIOS.map((s) => s.id).join(", ")}`,
     );
     process.exit(2);
   }
 
+  const scenarios =
+    scenarioIds.length > 0 ? scenarioIds.map((id) => SCENARIOS_BY_ID[id]) : SCENARIOS;
+
   const promptFile = process.env.LPL_PROMPT_FILE;
-  const systemPrompt =
-    promptFile && existsSync(promptFile) ? readFileSync(promptFile, "utf8") : INSURANCE_VOICE_AGENT_PROMPT;
+  if (promptFile && !existsSync(promptFile)) {
+    console.error(`Prompt file does not exist: ${promptFile}`);
+    process.exit(2);
+  }
+  const systemPrompt = promptFile ? readFileSync(promptFile, "utf8") : INSURANCE_VOICE_AGENT_PROMPT;
 
   console.log(`\n=== Liberate Prompt Lab — LLM Evaluation (${sel.provider}:${sel.model}) ===`);
-  console.log(`Prompt: ${promptFile && existsSync(promptFile) ? promptFile : "default (insuranceVoiceAgentPrompt.ts)"}`);
-  if (samples === 1) {
-    console.log("Non-deterministic: each scenario is one live sample. Use --samples N for pass-rate aggregation.\n");
-  } else {
-    console.log(`Multi-sample: ${samples} runs × ${scenarios.length} scenario(s) = ${samples * scenarios.length} total runs.\n`);
-  }
+  console.log(`Prompt: ${promptFile ?? "default (insuranceVoiceAgentPrompt.ts)"}`);
+  console.log(
+    samples === 1
+      ? "Single sample: strict threshold still applies. Use --samples N to measure stochastic reliability.\n"
+      : `Multi-sample: ${samples} runs × ${scenarios.length} scenario(s) = ${samples * scenarios.length} total runs.\n`,
+  );
 
   const agent = makeAgentWithCaller(systemPrompt, (system, user) => callProvider(sel, system, user));
 
-  let globalAnyFail = false;
   let globalScoreSum = 0;
-  let globalMaxSum = 0;
+  let globalMaxScoreSum = 0;
   let globalAgentTurns = 0;
   let globalFallbacks = 0;
+  let globalWeightedChecks = 0;
+  let globalCheckSamples = 0;
+  let belowThreshold = false;
 
   for (const scenario of scenarios) {
-    if (samples === 1) {
-      // --- Single-sample path (original behavior) ---
+    const aggregate = createAggregate(scenario.title);
+
+    for (let sample = 0; sample < samples; sample++) {
       const result = await runScenario(scenario, agent, SCENARIO_SCRIPTS[scenario.id] ?? [], "llm");
       const { evaluation } = result;
-      globalScoreSum += evaluation.totalScore;
-      globalMaxSum += evaluation.maxScore;
 
-      const agentTurns = result.turns.filter((t) => t.speaker === "agent");
-      const fellBack = agentTurns.filter((t) => t.source === "fallback").length;
-      globalAgentTurns += agentTurns.length;
-      globalFallbacks += fellBack;
-      if (evaluation.items.some((i) => i.status === "fail")) globalAnyFail = true;
+      aggregate.scoreSum += evaluation.totalScore;
+      aggregate.maxScoreSum += evaluation.maxScore;
 
-      const flag = fellBack ? `  (⚠ ${fellBack} turn(s) fell back to deterministic — model output rejected)` : "";
-      console.log(`${scenario.title}  —  ${evaluation.totalScore}/${evaluation.maxScore}${flag}`);
-      for (const i of evaluation.items) {
-        const detail = i.status === "pass" ? "" : ` — ${i.rationale}`;
-        console.log(`  ${SYMBOL[i.status]} ${i.label}${detail}`);
-      }
-      console.log("");
-    } else {
-      // --- Multi-sample path (Item 2) ---
-      // Track pass/warn/fail counts per rubric id across N runs.
-      const passCount: Record<string, number> = {};
-      const warnCount: Record<string, number> = {};
-      const failCount: Record<string, number> = {};
-      let sampleFallbacks = 0;
-      let sampleAgentTurns = 0;
-      let firstItems: typeof globalAnyFail extends boolean ? typeof globalAnyFail : never = false as never;
-      firstItems; // suppress unused warning
-      let rubricLabels: Record<string, string> = {};
-
-      for (let s = 0; s < samples; s++) {
-        const result = await runScenario(scenario, agent, SCENARIO_SCRIPTS[scenario.id] ?? [], "llm");
-        const { evaluation } = result;
-
-        for (const item of evaluation.items) {
-          rubricLabels[item.id] = item.label;
-          if (item.status === "pass") passCount[item.id] = (passCount[item.id] ?? 0) + 1;
-          else if (item.status === "warn") warnCount[item.id] = (warnCount[item.id] ?? 0) + 1;
-          else failCount[item.id] = (failCount[item.id] ?? 0) + 1;
-        }
-
-        const agentTurns = result.turns.filter((t) => t.speaker === "agent");
-        sampleFallbacks += agentTurns.filter((t) => t.source === "fallback").length;
-        sampleAgentTurns += agentTurns.length;
-
-        // Accumulate global score (average across samples).
-        globalScoreSum += evaluation.totalScore / samples;
-        globalMaxSum += evaluation.maxScore / samples;
+      for (const item of evaluation.items) {
+        recordCriterion(aggregate, item.id, item.label, item.status, item.rationale);
+        globalWeightedChecks += statusWeight(item.status);
+        globalCheckSamples += 1;
       }
 
-      globalAgentTurns += sampleAgentTurns;
-      globalFallbacks += sampleFallbacks;
+      const agentTurns = result.turns.filter((turn) => turn.speaker === "agent");
+      aggregate.agentTurns += agentTurns.length;
+      aggregate.fallbacks += agentTurns.filter((turn) => turn.source === "fallback").length;
+    }
 
-      const fallbackNote = sampleFallbacks > 0 ? `  ⚠ ${sampleFallbacks}/${sampleAgentTurns} agent turns fell back` : "";
-      console.log(`${scenario.title}  (${samples} samples)${fallbackNote}`);
+    globalScoreSum += aggregate.scoreSum;
+    globalMaxScoreSum += aggregate.maxScoreSum;
+    globalAgentTurns += aggregate.agentTurns;
+    globalFallbacks += aggregate.fallbacks;
 
-      // Per-check pass rate.
-      const rubricIds = Object.keys(rubricLabels);
-      let scenarioBelowThreshold = false;
-      for (const id of rubricIds) {
-        const p = passCount[id] ?? 0;
-        const w = warnCount[id] ?? 0;
-        const f = failCount[id] ?? 0;
-        // Weighted rate: pass=1, warn=0.5, fail=0.
-        const rate = (p + w * 0.5) / samples;
-        const pct = Math.round(rate * 100);
-        const sym = rate === 1 ? "✓" : rate >= threshold ? "⚠" : "✗";
-        if (rate < threshold) {
-          scenarioBelowThreshold = true;
-          globalAnyFail = true;
-        }
-        if (f > 0 && rate === 0) globalAnyFail = true;
-        console.log(`  ${sym} ${rubricLabels[id]}  ${pct}% (${p}✓ ${w}⚠ ${f}✗ / ${samples})`);
-      }
-      if (scenarioBelowThreshold) {
-        console.log(`  → At least one check below threshold (${Math.round(threshold * 100)}%)`);
-      }
-      console.log("");
+    if (printAggregate(aggregate, samples, threshold)) {
+      belowThreshold = true;
     }
   }
 
-  if (samples === 1) {
-    console.log(`Overall: ${Math.round(globalScoreSum * 10) / 10}/${globalMaxSum}`);
-  } else {
-    const avgScore = globalScoreSum;
-    const avgMax = globalMaxSum;
-    console.log(`Overall (avg across samples): ${Math.round(avgScore * 10) / 10}/${Math.round(avgMax)}`);
-    console.log(`Threshold: ${Math.round(threshold * 100)}% pass-rate required per check.`);
-  }
+  const averageScore = globalScoreSum / samples;
+  const averageMaxScore = globalMaxScoreSum / samples;
+  const overallPassRate = globalCheckSamples > 0 ? globalWeightedChecks / globalCheckSamples : 0;
+  const fallbackRate = globalAgentTurns > 0 ? globalFallbacks / globalAgentTurns : 0;
+  const fallbackExceeded = fallbackRate > maxFallbackRate;
+  const overallBelowThreshold = overallPassRate < threshold;
 
-  // If EVERY turn fell back, the model was never actually reached (bad key,
-  // network, etc.). The scores then reflect the deterministic golden transcript,
-  // not the prompt — so do not report a misleading PASS.
+  console.log(`Overall score (avg suite): ${round1(averageScore)}/${round1(averageMaxScore)}`);
+  console.log(`Overall weighted pass-rate: ${percent(overallPassRate)} (threshold ${percent(threshold)})`);
+  console.log(`Fallback rate: ${globalFallbacks}/${globalAgentTurns} turns (${percent(fallbackRate)})`);
+
   if (globalAgentTurns > 0 && globalFallbacks === globalAgentTurns) {
     console.log(
       "\nRESULT: ERROR — the live model was never reached; every turn fell back to the deterministic script.",
     );
     console.log(
-      "These scores reflect the golden transcript, NOT your prompt. Check the API key in .dev.vars / env and network.\n",
+      "These scores reflect the golden transcript, not your prompt. Check the API key in .dev.vars / env and network.\n",
     );
     process.exit(2);
   }
 
-  console.log(
-    globalAnyFail
-      ? "RESULT: FAIL — at least one check failed or fell below the threshold.\n"
-      : "RESULT: PASS — within policy on this sample.\n",
-  );
-  process.exit(globalAnyFail ? 1 : 0);
+  if (fallbackExceeded) {
+    console.log(
+      `\nRESULT: FAIL — fallback rate exceeded the configured maximum (${percent(maxFallbackRate)}).`,
+    );
+    process.exit(1);
+  }
+
+  if (belowThreshold || overallBelowThreshold) {
+    console.log("\nRESULT: FAIL — at least one check or the overall pass-rate fell below threshold.\n");
+    process.exit(1);
+  }
+
+  console.log("\nRESULT: PASS — all checks met the configured LLM reliability threshold.\n");
+  process.exit(0);
+}
+
+function createAggregate(title: string): ScenarioAggregate {
+  return {
+    title,
+    scoreSum: 0,
+    maxScoreSum: 0,
+    agentTurns: 0,
+    fallbacks: 0,
+    criterionOrder: [],
+    criteria: {},
+  };
+}
+
+function recordCriterion(
+  aggregate: ScenarioAggregate,
+  id: string,
+  label: string,
+  status: EvalStatus,
+  rationale: string,
+): void {
+  if (!aggregate.criteria[id]) {
+    aggregate.criteria[id] = { label, pass: 0, warn: 0, fail: 0, rationales: [] };
+    aggregate.criterionOrder.push(id);
+  }
+
+  aggregate.criteria[id][status] += 1;
+  if (status !== "pass" && rationale && aggregate.criteria[id].rationales.length < 3) {
+    aggregate.criteria[id].rationales.push(rationale);
+  }
+}
+
+function printAggregate(
+  aggregate: ScenarioAggregate,
+  samples: number,
+  threshold: number,
+): boolean {
+  const avgScore = aggregate.scoreSum / samples;
+  const avgMax = aggregate.maxScoreSum / samples;
+  const fallbackNote =
+    aggregate.fallbacks > 0
+      ? `  (⚠ ${aggregate.fallbacks}/${aggregate.agentTurns} agent turns fell back)`
+      : "";
+  console.log(`${aggregate.title}  —  ${round1(avgScore)}/${round1(avgMax)}${fallbackNote}`);
+
+  let scenarioBelowThreshold = false;
+  for (const id of aggregate.criterionOrder) {
+    const stats = aggregate.criteria[id];
+    const rate = (stats.pass + stats.warn * 0.5) / samples;
+    const status = displayStatus(rate, threshold);
+    if (rate < threshold) scenarioBelowThreshold = true;
+
+    if (samples === 1) {
+      const rationale = stats.rationales[0] ? ` — ${stats.rationales[0]}` : "";
+      console.log(`  ${SYMBOL[status]} ${stats.label} (${percent(rate)})${rationale}`);
+    } else {
+      const counts = `${stats.pass}✓ ${stats.warn}⚠ ${stats.fail}✗ / ${samples}`;
+      console.log(`  ${SYMBOL[status]} ${stats.label}  ${percent(rate)} (${counts})`);
+      if (stats.rationales.length > 0) {
+        console.log(`    ${stats.rationales[0]}`);
+      }
+    }
+  }
+
+  if (scenarioBelowThreshold) {
+    console.log(`  → At least one check below threshold (${percent(threshold)})`);
+  }
+  console.log("");
+  return scenarioBelowThreshold;
+}
+
+function displayStatus(rate: number, threshold: number): EvalStatus {
+  if (rate >= 1) return "pass";
+  if (rate >= threshold) return "warn";
+  return "fail";
+}
+
+function statusWeight(status: EvalStatus): number {
+  if (status === "pass") return 1;
+  if (status === "warn") return 0.5;
+  return 0;
+}
+
+function round1(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function percent(value: number): string {
+  return `${Math.round(value * 100)}%`;
 }
 
 main().catch((err) => {

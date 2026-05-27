@@ -16,6 +16,7 @@ Other scripts:
 ```bash
 npm run test       # Vitest unit tests (engine, tools, evaluator)
 npm run eval       # CLI: run all scenarios, print scorecards, exit non-zero on any failure
+npm run eval:llm   # Optional live-model eval with pass-rate and fallback thresholds
 npm run build      # production build (client + SSR)
 npm run typecheck  # tsc --noEmit
 ```
@@ -41,13 +42,15 @@ React UI (TanStack Start)
     → conversation runner (agent-agnostic, scripted/simulated caller side)
         → agent: deterministic (default) | LLM (optional)
         → caller: scripted queue | deterministic simulator | LLM caller
+        → optional failure-mode demo agents
         → mock tools: verifyIdentity, lookupPolicy, createClaim, updatePolicyDraft, escalateToHuman
     → evaluator (rule-based rubric) → scorecard
 ```
 
 - **Deterministic mode (default)** produces realistic, reproducible transcripts entirely in the browser — no network, so the demo always works.
 - **Structured scenario facts** drive caller behavior and expected outcomes: identity answers, loss/servicing facts, required tool arguments, forbidden tools, acceptable terminal states, and escalation reasons live in `src/data/scenarios.ts`.
-- **The evaluator** runs rule-based checks over the transcript + tool trace (identity-before-lookup, required-fields-before-claim, no coverage guarantee, no legal advice, one-question-per-turn, injury escalation, prompt-injection resistance, final summary, empathy, no prompt leak, scenario tool contract, required tool args, terminal state, escalation reason, licensed review language, lapsed-policy behavior, and ASR repair). `npm run eval` doubles as a **regression gate** for prompt changes.
+- **The evaluator** runs rule-based checks over the transcript + tool trace (identity-before-lookup, required-fields-before-claim, no coverage guarantee, no legal advice, one-question-per-turn, injury escalation, prompt-injection resistance, final summary, empathy, no prompt leak, scenario tool contract, required tool args, terminal state, escalation reason, licensed review language, state transitions, lapsed-policy behavior, and ASR repair). `npm run eval` doubles as a **regression gate** for prompt changes.
+- **Failure-mode demo agents** intentionally break one safety/workflow rule at a time (coverage guarantee, policy lookup before verification, missing fields before claim creation, injury over-automation, prompt leakage), so the scorecard can demonstrate regression detection without live API keys.
 - **The mock tools do not hide sequencing rules** — e.g. `lookupPolicy` will run even without prior verification. Enforcing the order is the agent's job and catching violations is the evaluator's job, which keeps failure modes visible.
 
 ## Optional LLM mode
@@ -60,6 +63,8 @@ npm run dev
 ```
 
 The key is read **server-side** by a small Vite dev middleware (`/api/llm`, `/api/llm-status`) and never reaches the browser. The UI toggle enables itself when a key is detected. The LLM agent reuses the same scenarios, prompt, tools, and evaluator; its structured output is Zod-validated and falls back to the deterministic agent on any error. Never commit `.dev.vars`.
+
+For prompt regression checks against a live model, run `npm run eval:llm -- --samples 5`. The runner fails when any rubric falls below the weighted pass-rate threshold (`--threshold`, default `0.8`) or when any model turn falls back to the deterministic script (`--max-fallback-rate`, default `0`).
 
 ## Project structure
 

@@ -16,12 +16,12 @@ export const AGENT_STATES: AgentState[] = [
 ];
 
 const TRANSITIONS: Record<AgentState, AgentState[]> = {
-  greeting: ["identity_verification", "intake", "escalation"],
+  greeting: ["identity_verification", "intake", "coverage_boundary", "escalation"],
   identity_verification: ["policy_lookup", "escalation"],
   policy_lookup: ["intake", "coverage_boundary", "escalation"],
   intake: ["intake", "tool_call", "coverage_boundary", "escalation"],
   tool_call: ["resolved", "escalation"],
-  coverage_boundary: ["intake", "escalation", "resolved"],
+  coverage_boundary: ["identity_verification", "intake", "escalation", "resolved"],
   escalation: [],
   resolved: [],
 };

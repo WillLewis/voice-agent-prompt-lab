@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { LabView, ToolCallView, PromptVersion } from "@/lab/types";
+import type { LabView, ToolCallView, PromptVersion, RunAllSummary } from "@/lab/types";
 import {
   loadPromptVersions,
   savePromptVersion,
@@ -23,6 +23,8 @@ type InspectorProps = {
   onResetPrompt: () => void;
   /** All current scores by scenarioId — used to snapshot per-version scores. */
   currentScores?: Record<string, string>;
+  /** Most recent Run All result, used to compare the full suite before/after. */
+  runAllSummary?: RunAllSummary | null;
 };
 
 export function InspectorTabs({
@@ -33,6 +35,7 @@ export function InspectorTabs({
   onPromptChange,
   onResetPrompt,
   currentScores,
+  runAllSummary,
 }: InspectorProps) {
   return (
     <aside className="flex h-full w-[500px] shrink-0 flex-col border-l border-slate-200 bg-slate-50/40">
@@ -61,7 +64,7 @@ export function InspectorTabs({
             <ToolCallsView view={view} />
           </TabsContent>
           <TabsContent value="eval" className="mt-0">
-            <ScorecardView view={view} />
+            <ScorecardView view={view} runAllSummary={runAllSummary} />
           </TabsContent>
           <TabsContent value="judge" className="mt-0">
             <JudgeView view={view} mode={mode} />
@@ -237,9 +240,17 @@ function KvBlock({ label, value }: { label: string; value: Record<string, unknow
   );
 }
 
-function ScorecardView({ view }: { view: LabView }) {
+function ScorecardView({
+  view,
+  runAllSummary,
+}: {
+  view: LabView;
+  runAllSummary?: RunAllSummary | null;
+}) {
   return (
     <div className="space-y-3">
+      {runAllSummary && <RunAllComparison summary={runAllSummary} />}
+
       <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3.5 py-3">
         <div>
           <div className="text-[11px] uppercase tracking-wide text-slate-500">Overall</div>
@@ -275,6 +286,120 @@ function ScorecardView({ view }: { view: LabView }) {
       </div>
     </div>
   );
+}
+
+function RunAllComparison({ summary }: { summary: RunAllSummary }) {
+  const ranAt = new Date(summary.ranAt).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-slate-500">Run All comparison</div>
+          <div className="mt-0.5 text-lg font-semibold text-slate-900">{summary.totalScore}</div>
+          <div className="mt-0.5 text-[11.5px] text-slate-500">
+            {summary.runLabel} · {ranAt}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+          <NeutralBadge>{summary.passCount} pass</NeutralBadge>
+          <NeutralBadge>{summary.warnCount} warn</NeutralBadge>
+          <NeutralBadge>{summary.failCount} fail</NeutralBadge>
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-md border border-slate-200">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-[10.5px] uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-2.5 py-2 text-left font-medium">Scenario</th>
+              <th className="px-2.5 py-2 text-left font-medium">Before</th>
+              <th className="px-2.5 py-2 text-left font-medium">After</th>
+              <th className="px-2.5 py-2 text-left font-medium">Issues</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {summary.rows.map((row) => (
+              <tr key={row.scenarioId} className="align-top">
+                <td className="px-2.5 py-2">
+                  <div className="text-[12.5px] font-medium text-slate-900">{row.title}</div>
+                  <div className={cn("mt-1 font-mono text-[11px]", deltaClass(row.scoreDelta))}>
+                    {formatDelta(row.scoreDelta)}
+                  </div>
+                </td>
+                <td className="px-2.5 py-2">
+                  <div className="font-mono text-[11.5px] text-slate-600">
+                    {row.beforeScore ?? "new"}
+                  </div>
+                  {row.beforeStatus && <EvalBadge status={row.beforeStatus} />}
+                </td>
+                <td className="px-2.5 py-2">
+                  <div className="font-mono text-[11.5px] text-slate-800">{row.afterScore}</div>
+                  <EvalBadge status={row.afterStatus} />
+                </td>
+                <td className="px-2.5 py-2">
+                  <IssueSummary
+                    failedCriteria={row.failedCriteria}
+                    warnedCriteria={row.warnedCriteria}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function IssueSummary({
+  failedCriteria,
+  warnedCriteria,
+}: {
+  failedCriteria: string[];
+  warnedCriteria: string[];
+}) {
+  const issues = [
+    ...failedCriteria.map((criterion) => ({ criterion, kind: "fail" as const })),
+    ...warnedCriteria.map((criterion) => ({ criterion, kind: "warn" as const })),
+  ];
+
+  if (issues.length === 0) {
+    return <span className="text-[11.5px] text-slate-400">No open issues</span>;
+  }
+
+  return (
+    <div className="space-y-1">
+      {issues.slice(0, 3).map((issue) => (
+        <div
+          key={`${issue.kind}-${issue.criterion}`}
+          className={cn(
+            "rounded px-1.5 py-0.5 text-[11px] leading-snug",
+            issue.kind === "fail" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700",
+          )}
+        >
+          {issue.criterion}
+        </div>
+      ))}
+      {issues.length > 3 && (
+        <div className="text-[11px] text-slate-400">+{issues.length - 3} more</div>
+      )}
+    </div>
+  );
+}
+
+function formatDelta(delta?: number): string {
+  if (delta === undefined) return "baseline";
+  if (delta === 0) return "no change";
+  return delta > 0 ? `+${delta}` : String(delta);
+}
+
+function deltaClass(delta?: number): string {
+  if (delta === undefined || delta === 0) return "text-slate-400";
+  return delta > 0 ? "text-emerald-600" : "text-rose-600";
 }
 
 // ---------------------------------------------------------------------------

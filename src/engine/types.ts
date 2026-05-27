@@ -128,6 +128,14 @@ export interface Scenario {
 
 export type RunMode = "deterministic" | "llm";
 
+export type FailureModeId =
+  | "none"
+  | "lookup-before-verify"
+  | "missing-fields-claim"
+  | "coverage-guarantee"
+  | "injury-overcollect"
+  | "prompt-leak";
+
 /** The raw conversation produced by a run, before scoring. */
 export interface ConversationTrace {
   turns: AgentTurn[];

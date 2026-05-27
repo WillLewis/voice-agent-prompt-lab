@@ -1,15 +1,19 @@
 import { cn } from "@/lib/utils";
 import type { LabView, Turn } from "@/lab/types";
 import { StateBadge, RiskBadge, NeutralBadge } from "./StatusBadge";
-import { Mic, User, ArrowRight, Play, Loader2, RotateCcw, TriangleAlert, CircleCheck, Info } from "lucide-react";
+import { Mic, User, ArrowRight, Play, Loader2, RotateCcw, TriangleAlert, CircleCheck, Info, ListChecks } from "lucide-react";
 
 type Props = {
   view: LabView;
   onRun: () => void;
+  onRunAll?: () => void;
   running: boolean;
+  runningAll?: boolean;
 };
 
-export function TranscriptPanel({ view, onRun, running }: Props) {
+export function TranscriptPanel({ view, onRun, onRunAll, running, runningAll = false }: Props) {
+  const busy = running || runningAll;
+
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col bg-white">
       <header className="border-b border-slate-200 px-6 py-4">
@@ -51,9 +55,23 @@ export function TranscriptPanel({ view, onRun, running }: Props) {
           turns: {view.transcript.length} · tools: {view.toolCalls.length}
         </div>
         <div className="flex items-center gap-2">
+          {onRunAll && (
+            <button
+              onClick={onRunAll}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-100 disabled:opacity-60"
+            >
+              {runningAll ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <ListChecks className="size-3.5" />
+              )}
+              {runningAll ? "Running all…" : "Run all"}
+            </button>
+          )}
           <button
             onClick={onRun}
-            disabled={running}
+            disabled={busy}
             className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1 text-xs font-medium text-white shadow-sm transition-colors hover:bg-slate-800 disabled:opacity-60"
           >
             {running ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}

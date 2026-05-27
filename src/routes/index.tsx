@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { SCENARIOS } from "@/data/scenarios";
-import { runLab, runAllDeterministic } from "@/lab/run";
+import { runLab, runAllDeterministic, runAllLab, type RunLabOptions } from "@/lab/run";
+import { FAILURE_MODE_OPTIONS } from "@/engine/failureAgents";
 import { INSURANCE_VOICE_AGENT_PROMPT } from "@/prompts/insuranceVoiceAgentPrompt";
-import type { LabView, ScenarioMeta, CallerMode, CallerPersona } from "@/lab/types";
-import type { RunMode } from "@/engine/types";
+import type { LabView, ScenarioMeta, CallerMode, CallerPersona, RunAllSummary } from "@/lab/types";
+import type { FailureModeId, RunMode } from "@/engine/types";
 import { ScenarioList } from "@/components/lab/ScenarioList";
 import { TranscriptPanel } from "@/components/lab/TranscriptPanel";
 import { InspectorTabs } from "@/components/lab/InspectorTabs";
@@ -29,12 +30,15 @@ function Index() {
   const [mode, setMode] = useState<RunMode>("deterministic");
   const [prompt, setPrompt] = useState(INSURANCE_VOICE_AGENT_PROMPT);
   const [running, setRunning] = useState(false);
+  const [runningAll, setRunningAll] = useState(false);
   const [llm, setLlm] = useState<{ available: boolean; provider?: string }>({ available: false });
   // Item 1: adaptive caller controls
   const [callerMode, setCallerMode] = useState<CallerMode>("scripted");
   const [callerPersona, setCallerPersona] = useState<CallerPersona>("cooperative");
   // Item 5: ASR noise toggle
   const [noiseEnabled, setNoiseEnabled] = useState(false);
+  const [failureMode, setFailureMode] = useState<FailureModeId>("none");
+  const [runAllSummary, setRunAllSummary] = useState<RunAllSummary | null>(null);
 
   // Seed the dashboard: run every scenario deterministically (instant, local).
   useEffect(() => {
@@ -85,21 +89,35 @@ function Index() {
   async function handleRun() {
     setRunning(true);
     try {
-      const v = await runLab(activeId, {
-        mode,
-        systemPrompt: prompt,
-        callerMode,
-        callerPersona,
-        noiseEnabled,
-      });
+      const v = await runLab(activeId, currentRunOptions());
       setViews((prev) => ({ ...prev, [activeId]: v }));
+      setRunAllSummary(null);
     } finally {
       setRunning(false);
     }
   }
 
+  function currentRunOptions(): RunLabOptions {
+    return { mode, systemPrompt: prompt, callerMode, callerPersona, noiseEnabled, failureMode };
+  }
+
+  async function handleRunAll() {
+    setRunningAll(true);
+    try {
+      const before = views;
+      const next = await runAllLab(currentRunOptions());
+      setViews(next);
+      setRunAllSummary(
+        buildRunAllSummary(before, next, runLabel(mode, callerMode, failureMode, noiseEnabled)),
+      );
+    } finally {
+      setRunningAll(false);
+    }
+  }
+
   // Live caller requires LLM mode + key; simulated caller is local and always available.
   const liveCallerAvailable = mode === "llm" && llm.available;
+  const busy = running || runningAll;
 
   return (
     <div className="flex h-screen flex-col bg-slate-100 text-slate-900">
@@ -118,6 +136,7 @@ function Index() {
         <div className="flex items-center gap-2 flex-wrap justify-end">
           {/* Agent mode toggle */}
           <ModeToggle mode={mode} onChange={setMode} llmAvailable={llm.available} />
+          <FailureModeSelect value={failureMode} onChange={setFailureMode} />
           {/* Caller mode toggle (Item 1) */}
           <CallerToggle
             callerMode={callerMode}
@@ -143,17 +162,17 @@ function Index() {
             available={callerMode === "simulated" || (callerMode === "live" && liveCallerAvailable)}
           />
           <NeutralBadge>
-            engine: {mode === "llm" ? llm.provider ?? "llm" : "deterministic"}
+            engine: {failureMode !== "none" ? "failure demo" : mode === "llm" ? llm.provider ?? "llm" : "deterministic"}
           </NeutralBadge>
           <span
             className={
-              running
+              busy
                 ? "inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200"
                 : "inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200"
             }
           >
-            {running ? <Loader2 className="size-3 animate-spin" /> : <Activity className="size-3" />}
-            {running ? "running" : "idle"}
+            {busy ? <Loader2 className="size-3 animate-spin" /> : <Activity className="size-3" />}
+            {runningAll ? "running all" : running ? "running" : "idle"}
           </span>
         </div>
       </header>
@@ -162,7 +181,13 @@ function Index() {
         <ScenarioList items={items} activeId={activeId} onSelect={setActiveId} />
         {activeView ? (
           <>
-            <TranscriptPanel view={activeView} onRun={handleRun} running={running} />
+            <TranscriptPanel
+              view={activeView}
+              onRun={handleRun}
+              onRunAll={handleRunAll}
+              running={running}
+              runningAll={runningAll}
+            />
             <InspectorTabs
               view={activeView}
               prompt={prompt}
@@ -171,6 +196,7 @@ function Index() {
               onPromptChange={setPrompt}
               onResetPrompt={() => setPrompt(INSURANCE_VOICE_AGENT_PROMPT)}
               currentScores={currentScores}
+              runAllSummary={runAllSummary}
             />
           </>
         ) : (
@@ -181,6 +207,90 @@ function Index() {
       </main>
     </div>
   );
+}
+
+function buildRunAllSummary(
+  before: Record<string, LabView>,
+  after: Record<string, LabView>,
+  runLabelText: string,
+): RunAllSummary {
+  let score = 0;
+  let maxScore = 0;
+  let passCount = 0;
+  let warnCount = 0;
+  let failCount = 0;
+
+  const rows = SCENARIOS.map((scenario) => {
+    const beforeView = before[scenario.id];
+    const afterView = after[scenario.id];
+    const afterScoreParts = parseScore(afterView.overallScore);
+    score += afterScoreParts.score;
+    maxScore += afterScoreParts.max;
+
+    if (afterView.lastEval === "pass") passCount += 1;
+    else if (afterView.lastEval === "warn") warnCount += 1;
+    else failCount += 1;
+
+    const beforeScore = beforeView ? parseScore(beforeView.overallScore).score : undefined;
+    const scoreDelta = beforeScore === undefined ? undefined : afterScoreParts.score - beforeScore;
+
+    return {
+      scenarioId: scenario.id,
+      title: scenario.title,
+      beforeScore: beforeView?.overallScore,
+      afterScore: afterView.overallScore,
+      scoreDelta,
+      beforeStatus: beforeView?.lastEval,
+      afterStatus: afterView.lastEval,
+      failedCriteria: afterView.scorecard
+        .filter((row) => row.status === "fail")
+        .map((row) => row.criterion),
+      warnedCriteria: afterView.scorecard
+        .filter((row) => row.status === "warn")
+        .map((row) => row.criterion),
+    };
+  });
+
+  return {
+    ranAt: new Date().toISOString(),
+    runLabel: runLabelText,
+    totalScore: `${trimScore(score)}/${trimScore(maxScore)}`,
+    passCount,
+    warnCount,
+    failCount,
+    rows,
+  };
+}
+
+function parseScore(scoreText: string): { score: number; max: number } {
+  const [scoreRaw, maxRaw] = scoreText.split("/");
+  return {
+    score: Number.parseFloat(scoreRaw) || 0,
+    max: Number.parseFloat(maxRaw) || 0,
+  };
+}
+
+function trimScore(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function runLabel(
+  mode: RunMode,
+  callerMode: CallerMode,
+  failureMode: FailureModeId,
+  noiseEnabled: boolean,
+): string {
+  const failure = FAILURE_MODE_OPTIONS.find((option) => option.id === failureMode);
+  if (failure && failure.id !== "none") return `failure demo: ${failure.label}`;
+
+  const modeLabel = mode === "llm" ? "LLM agent" : "deterministic agent";
+  const callerLabel =
+    callerMode === "scripted"
+      ? "scripted caller"
+      : callerMode === "simulated"
+        ? "simulated caller"
+        : "live caller";
+  return `${modeLabel} · ${callerLabel}${noiseEnabled ? " · ASR noise" : ""}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +330,33 @@ function ModeToggle({
       {btn("deterministic", "Deterministic")}
       {btn("llm", "LLM", !llmAvailable)}
     </div>
+  );
+}
+
+function FailureModeSelect({
+  value,
+  onChange,
+}: {
+  value: FailureModeId;
+  onChange: (value: FailureModeId) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as FailureModeId)}
+      title="Run an intentionally broken local agent to demonstrate eval failures"
+      className={
+        value === "none"
+          ? "rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-300"
+          : "rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700 focus:outline-none focus:ring-1 focus:ring-rose-300"
+      }
+    >
+      {FAILURE_MODE_OPTIONS.map((option) => (
+        <option key={option.id} value={option.id} title={option.description}>
+          Agent: {option.label}
+        </option>
+      ))}
+    </select>
   );
 }
 

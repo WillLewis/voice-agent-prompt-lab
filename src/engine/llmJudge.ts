@@ -53,15 +53,21 @@ function formatTranscriptForJudge(view: LabView): string {
   const tools = view.toolCalls.length
     ? "\n\nTool calls:\n" +
       view.toolCalls
-        .map((tc) => `  ${tc.name}(${JSON.stringify(tc.args)}) → ${JSON.stringify(tc.result)}`)
+        .map(
+          (tc) =>
+            `  ${tc.name} status=${tc.status} args=${JSON.stringify(tc.args)} result=${JSON.stringify(tc.result)}`,
+        )
         .join("\n")
     : "";
+  const scorecard = view.scorecard
+    .map((row) => `  ${row.status} ${row.criterion} ${row.score}: ${row.note}`)
+    .join("\n");
   const meta = [
     `Scenario: ${view.title}`,
     `Intent: ${view.intent}`,
-    `Expected outcome: ${view.intent}`,
     `Final state: ${view.state}`,
     `Rule-based score: ${view.overallScore}`,
+    `Rule-based scorecard:\n${scorecard}`,
   ].join("\n");
 
   return `${meta}\n\nTranscript:\n${turns}${tools}`;

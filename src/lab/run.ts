@@ -1,8 +1,9 @@
-import type { Agent, Caller, RunMode } from "../engine/types";
+import type { Agent, Caller, FailureModeId, RunMode } from "../engine/types";
 import { SCENARIOS, SCENARIOS_BY_ID } from "../data/scenarios";
 import { SCENARIO_SCRIPTS } from "../data/scenarioScripts";
 import { deterministicAgent } from "../engine/deterministicAgent";
 import { makeDeterministicCaller } from "../engine/deterministicCaller";
+import { makeFailureModeAgent } from "../engine/failureAgents";
 import { runScenario } from "../engine/runScenario";
 import { INSURANCE_VOICE_AGENT_PROMPT } from "../prompts/insuranceVoiceAgentPrompt";
 import { mapRunToLabView } from "./adapter";
@@ -22,6 +23,8 @@ export interface RunLabOptions {
   callerPersona?: CallerPersona;
   /** Apply ASR noise to caller utterances (Item 5). */
   noiseEnabled?: boolean;
+  /** Local intentionally-broken agent for demonstrating evaluator failures. */
+  failureMode?: FailureModeId;
 }
 
 export async function runLab(
@@ -32,6 +35,7 @@ export async function runLab(
     callerMode = "scripted",
     callerPersona = "cooperative",
     noiseEnabled = false,
+    failureMode = "none",
   }: RunLabOptions = {},
 ): Promise<LabView> {
   const scenario = SCENARIOS_BY_ID[scenarioId];
@@ -42,7 +46,9 @@ export async function runLab(
     caller = makeDeterministicCaller(scenario.facts, callerPersona);
   }
 
-  if (mode === "llm") {
+  if (failureMode !== "none") {
+    agent = makeFailureModeAgent(failureMode);
+  } else if (mode === "llm") {
     // Lazy-load so the LLM path (and its fetch usage) is only pulled in on demand.
     const { makeLlmAgent } = await import("../engine/llmAgent");
     agent = makeLlmAgent(systemPrompt);
@@ -65,10 +71,15 @@ export async function runLab(
   return mapRunToLabView(scenario, run, mode === "llm" ? systemPrompt : INSURANCE_VOICE_AGENT_PROMPT);
 }
 
+export async function runAllLab(options: RunLabOptions = {}): Promise<Record<string, LabView>> {
+  const entries: Array<readonly [string, LabView]> = [];
+  for (const scenario of SCENARIOS) {
+    entries.push([scenario.id, await runLab(scenario.id, options)] as const);
+  }
+  return Object.fromEntries(entries);
+}
+
 /** Runs every scenario deterministically — used to seed the dashboard on load. */
 export async function runAllDeterministic(): Promise<Record<string, LabView>> {
-  const entries = await Promise.all(
-    SCENARIOS.map(async (s) => [s.id, await runLab(s.id, { mode: "deterministic" })] as const),
-  );
-  return Object.fromEntries(entries);
+  return runAllLab({ mode: "deterministic" });
 }
