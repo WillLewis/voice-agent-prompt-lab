@@ -1,8 +1,8 @@
-# AGENTS.md — Liberate Prompt Lab
+# AGENTS.md — Insurtech Prompt Lab
 
 ## Project identity
 
-This repo is **Liberate Prompt Lab**: a lightweight local app for demonstrating prompt architecture and evaluation for an insurance voice agent.
+This repo is **Insurtech Prompt Lab**: a lightweight local app for demonstrating prompt architecture and evaluation for an insurance voice agent.
 
 This is an interview demo, not a production platform.
 

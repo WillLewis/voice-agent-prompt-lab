@@ -128,10 +128,10 @@ function Index() {
     <div className="flex h-screen flex-col bg-slate-100 text-slate-900">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5">
         <div className="flex items-center gap-3">
-          <img src="/favicon.svg" alt="Liberate Prompt Lab logo" className="size-7 rounded-md" />
+          <img src="/favicon.svg" alt="Insurtech Prompt Lab logo" className="size-7 rounded-md" />
           <div>
             <div className="text-sm font-semibold leading-tight text-slate-900">
-              Liberate Prompt Lab
+              Insurtech Prompt Lab
             </div>
             <div className="text-[11px] leading-tight text-slate-500">
               Insurance voice agent · eval harness

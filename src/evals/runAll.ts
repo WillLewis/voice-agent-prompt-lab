@@ -11,7 +11,7 @@ import type { EvalStatus } from "../engine/types";
 const SYMBOL: Record<EvalStatus, string> = { pass: "✓", warn: "⚠", fail: "✗" };
 
 async function main(): Promise<void> {
-  console.log("\n=== Liberate Prompt Lab — Deterministic Evaluation ===\n");
+  console.log("\n=== Insurtech Prompt Lab — Deterministic Evaluation ===\n");
 
   let anyFail = false;
   let scoreSum = 0;

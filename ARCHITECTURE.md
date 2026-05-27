@@ -1,4 +1,4 @@
-# Liberate Prompt Lab — Architecture
+# Insurtech Prompt Lab — Architecture
 
 ## North Star
 

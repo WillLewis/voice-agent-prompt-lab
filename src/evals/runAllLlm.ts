@@ -149,7 +149,7 @@ async function main(): Promise<void> {
   }
   const systemPrompt = promptFile ? readFileSync(promptFile, "utf8") : INSURANCE_VOICE_AGENT_PROMPT;
 
-  console.log(`\n=== Liberate Prompt Lab — LLM Evaluation (${sel.provider}:${sel.model}) ===`);
+  console.log(`\n=== Insurtech Prompt Lab — LLM Evaluation (${sel.provider}:${sel.model}) ===`);
   console.log(`Prompt: ${promptFile ?? "default (insuranceVoiceAgentPrompt.ts)"}`);
   console.log(
     samples === 1

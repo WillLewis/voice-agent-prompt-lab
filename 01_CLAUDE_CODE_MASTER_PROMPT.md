@@ -1,6 +1,6 @@
-# Claude Code Master Prompt — Build the Liberate Prompt Lab
+# Claude Code Master Prompt — Build the Insurtech Prompt Lab
 
-You are Claude Code acting as a senior full-stack engineer and AI-agent prototyper. Build a lightweight local web app called **Liberate Prompt Lab**.
+You are Claude Code acting as a senior full-stack engineer and AI-agent prototyper. Build a lightweight local web app called **Insurtech Prompt Lab**.
 
 This app is for a prompting interview at an insurance AI company. It should demonstrate how to design, test, and iterate prompts for an insurance voice agent. Do not build a production telephony product. Build a local prompt/evaluation harness that looks polished, runs reliably, and makes the reasoning layer visible.
 

@@ -1,4 +1,4 @@
-// Domain types for the Liberate Prompt Lab reasoning layer.
+// Domain types for the Insurtech Prompt Lab reasoning layer.
 //
 // This module is framework-agnostic: it must not import React, Vite, or any
 // browser/SSR code, because it is consumed by the in-browser UI, the Vitest
