@@ -18,6 +18,7 @@ npm run test       # Vitest unit tests (engine, tools, evaluator)
 npm run eval       # CLI: run all scenarios, print scorecards, exit non-zero on any failure
 npm run eval:llm   # Optional live-model eval with pass-rate and fallback thresholds
 npm run build      # production build (client + SSR)
+npm run deploy     # deploy built Worker + static assets via dist/server/wrangler.json
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -76,6 +77,15 @@ ANTHROPIC_API_KEY=<Cloudflare secret>
 ```
 
 The public demo accepts only trusted prompt presets and scenario-bound request context. It rejects arbitrary browser-supplied system/user prompts, requires the `LPL_RATE_LIMITER` Cloudflare Rate Limiting binding, disables public live-caller/judge endpoints, and keeps deterministic mode available even if LLM mode is unavailable.
+
+Cloudflare dashboard builds should use:
+
+```txt
+Build command: npm run build
+Deploy command: npm run deploy
+```
+
+The deploy command must target `dist/server/wrangler.json`; that generated config includes the static asset directory (`dist/client`). Deploying with plain `npx wrangler deploy` can publish the Worker code without CSS/JS assets.
 
 For prompt regression checks against a live model, run `npm run eval:llm -- --samples 5`. The runner fails when any rubric falls below the weighted pass-rate threshold (`--threshold`, default `0.8`) or when any model turn falls back to the deterministic script (`--max-fallback-rate`, default `0`).
 
