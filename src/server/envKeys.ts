@@ -6,7 +6,14 @@ import type { EnvKeys } from "../engine/llmClient";
 // env wins). Shared by the dev LLM proxy and the CLI eval runner. Never logs
 // values. Not imported by the browser bundle.
 
-const KEY_NAMES = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LPL_MODEL"] as const;
+const KEY_NAMES = [
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "LPL_MODEL",
+  "LPL_LLM_ENABLED",
+  "LPL_PUBLIC_DEMO",
+  "LPL_ALLOWED_ORIGIN",
+] as const;
 
 export function loadEnvKeys(root: string): EnvKeys {
   const env: Record<string, string> = {};

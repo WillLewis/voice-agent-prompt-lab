@@ -6,6 +6,7 @@ import { makeDeterministicCaller } from "../engine/deterministicCaller";
 import { makeFailureModeAgent } from "../engine/failureAgents";
 import { runScenario } from "../engine/runScenario";
 import { INSURANCE_VOICE_AGENT_PROMPT } from "../prompts/insuranceVoiceAgentPrompt";
+import type { PromptPresetId } from "../prompts/promptPresets";
 import { mapRunToLabView } from "./adapter";
 import type { CallerMode, CallerPersona, LabView } from "./types";
 
@@ -25,6 +26,9 @@ export interface RunLabOptions {
   noiseEnabled?: boolean;
   /** Local intentionally-broken agent for demonstrating evaluator failures. */
   failureMode?: FailureModeId;
+  /** Hosted public mode uses prompt presets instead of arbitrary prompt text. */
+  publicDemo?: boolean;
+  promptPresetId?: PromptPresetId;
 }
 
 export async function runLab(
@@ -36,6 +40,8 @@ export async function runLab(
     callerPersona = "cooperative",
     noiseEnabled = false,
     failureMode = "none",
+    publicDemo = false,
+    promptPresetId = "robust",
   }: RunLabOptions = {},
 ): Promise<LabView> {
   const scenario = SCENARIOS_BY_ID[scenarioId];
@@ -51,9 +57,9 @@ export async function runLab(
   } else if (mode === "llm") {
     // Lazy-load so the LLM path (and its fetch usage) is only pulled in on demand.
     const { makeLlmAgent } = await import("../engine/llmAgent");
-    agent = makeLlmAgent(systemPrompt);
+    agent = makeLlmAgent(systemPrompt, { publicDemo, promptPresetId });
 
-    if (callerMode === "live") {
+    if (!publicDemo && callerMode === "live") {
       const { makeBrowserLlmCaller } = await import("../engine/llmCaller");
       caller = makeBrowserLlmCaller(scenario.facts, callerPersona);
     }

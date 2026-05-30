@@ -99,15 +99,16 @@ async function main(): Promise<void> {
   const sel = selectProvider(loadEnvKeys(process.cwd()));
   if (!sel) {
     console.error(
-      "eval:llm needs an API key. Add ANTHROPIC_API_KEY or OPENAI_API_KEY to .dev.vars (or the env).",
+      "eval:llm needs an API key. Add ANTHROPIC_API_KEY to .dev.vars (or the env).",
     );
     process.exit(2);
   }
 
   const { scenarioIds, samples, threshold, maxFallbackRate } = options;
 
-  const keyEnvVar = sel.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
-  const keySource = process.env[keyEnvVar] ? "shell env (overrides .dev.vars)" : ".dev.vars file";
+  const keySource = process.env.ANTHROPIC_API_KEY
+    ? "shell env (overrides .dev.vars)"
+    : ".dev.vars file";
   console.log(`\n[eval:llm] provider=${sel.provider} model=${sel.model} · key source: ${keySource}`);
   console.log(
     `[eval:llm] samples=${samples} · threshold=${percent(threshold)} · max fallback=${percent(maxFallbackRate)}`,

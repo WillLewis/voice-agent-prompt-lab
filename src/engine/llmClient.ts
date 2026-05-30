@@ -14,12 +14,30 @@ export interface EnvKeys {
   ANTHROPIC_API_KEY?: string;
   OPENAI_API_KEY?: string;
   LPL_MODEL?: string;
+  LPL_LLM_ENABLED?: string;
+  LPL_PUBLIC_DEMO?: string;
+  LPL_ALLOWED_ORIGIN?: string;
 }
 
 const DEFAULT_MODEL: Record<Provider, string> = {
-  anthropic: "claude-sonnet-4-6",
+  anthropic: "claude-sonnet-4-20250514",
   openai: "gpt-4o-mini",
 };
+
+export interface ProviderCallOptions {
+  maxTokens?: number;
+  timeoutMs?: number;
+}
+
+function timeoutSignal(timeoutMs: number | undefined): { signal?: AbortSignal; cleanup: () => void } {
+  if (!timeoutMs || timeoutMs <= 0) return { cleanup: () => {} };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    cleanup: () => clearTimeout(timer),
+  };
+}
 
 // JSON Schema for the agent's structured turn. Mirrors the Zod OutputSchema in
 // llmAgent.ts / the AgentOutput type. Used as an Anthropic tool input_schema so
@@ -70,13 +88,6 @@ export function selectProvider(env: EnvKeys): ProviderSelection | null {
       model: env.LPL_MODEL || DEFAULT_MODEL.anthropic,
     };
   }
-  if (env.OPENAI_API_KEY) {
-    return {
-      provider: "openai",
-      apiKey: env.OPENAI_API_KEY,
-      model: env.LPL_MODEL || DEFAULT_MODEL.openai,
-    };
-  }
   return null;
 }
 
@@ -84,10 +95,13 @@ export async function callProvider(
   sel: ProviderSelection,
   system: string,
   user: string,
+  options: ProviderCallOptions = {},
 ): Promise<string> {
   if (sel.provider === "anthropic") {
+    const timeout = timeoutSignal(options.timeoutMs);
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
+      signal: timeout.signal,
       headers: {
         "content-type": "application/json",
         "x-api-key": sel.apiKey,
@@ -95,7 +109,7 @@ export async function callProvider(
       },
       body: JSON.stringify({
         model: sel.model,
-        max_tokens: 1024,
+        max_tokens: options.maxTokens ?? 1024,
         system,
         tools: [
           {
@@ -109,7 +123,7 @@ export async function callProvider(
         tool_choice: { type: "tool", name: "emit_turn" },
         messages: [{ role: "user", content: user }],
       }),
-    });
+    }).finally(timeout.cleanup);
     if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
     const data = (await res.json()) as { content?: Array<{ type: string; input?: unknown }> };
     const toolUse = data.content?.find((b) => b.type === "tool_use");
@@ -119,8 +133,10 @@ export async function callProvider(
   }
 
   // openai
+  const timeout = timeoutSignal(options.timeoutMs);
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
+    signal: timeout.signal,
     headers: { "content-type": "application/json", authorization: `Bearer ${sel.apiKey}` },
     body: JSON.stringify({
       model: sel.model,
@@ -130,7 +146,7 @@ export async function callProvider(
       ],
       response_format: { type: "json_object" },
     }),
-  });
+  }).finally(timeout.cleanup);
   if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`);
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   return data.choices?.[0]?.message?.content ?? "";
@@ -143,10 +159,13 @@ export async function callProviderFreeform(
   sel: ProviderSelection,
   system: string,
   user: string,
+  options: ProviderCallOptions = {},
 ): Promise<string> {
   if (sel.provider === "anthropic") {
+    const timeout = timeoutSignal(options.timeoutMs);
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
+      signal: timeout.signal,
       headers: {
         "content-type": "application/json",
         "x-api-key": sel.apiKey,
@@ -154,19 +173,21 @@ export async function callProviderFreeform(
       },
       body: JSON.stringify({
         model: sel.model,
-        max_tokens: 2048,
+        max_tokens: options.maxTokens ?? 2048,
         system,
         messages: [{ role: "user", content: user }],
       }),
-    });
+    }).finally(timeout.cleanup);
     if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
     const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
     return data.content?.find((b) => b.type === "text")?.text ?? "";
   }
 
   // openai — plain text, not forced JSON
+  const timeout = timeoutSignal(options.timeoutMs);
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
+    signal: timeout.signal,
     headers: { "content-type": "application/json", authorization: `Bearer ${sel.apiKey}` },
     body: JSON.stringify({
       model: sel.model,
@@ -175,7 +196,7 @@ export async function callProviderFreeform(
         { role: "user", content: user },
       ],
     }),
-  });
+  }).finally(timeout.cleanup);
   if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`);
   const data2 = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   return data2.choices?.[0]?.message?.content ?? "";

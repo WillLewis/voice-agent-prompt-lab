@@ -56,14 +56,26 @@ React UI (TanStack Start)
 
 ## Optional LLM mode
 
-LLM mode is off by default. To enable it:
+LLM mode is off by default. To enable it locally:
 
 ```bash
-cp .dev.vars.example .dev.vars     # then add ANTHROPIC_API_KEY (or OPENAI_API_KEY)
+cp .dev.vars.example .dev.vars     # then add ANTHROPIC_API_KEY
 npm run dev
 ```
 
-The key is read **server-side** by a small Vite dev middleware (`/api/llm`, `/api/llm-status`) and never reaches the browser. The UI toggle enables itself when a key is detected. The LLM agent reuses the same scenarios, prompt, tools, and evaluator; its structured output is Zod-validated and falls back to the deterministic agent on any error. Never commit `.dev.vars`.
+The hosted/public path is Anthropic-only for now. The key is read **server-side** by shared Vite/Worker route handling (`/api/llm`, `/api/llm-status` locally; `/voice/api/llm`, `/voice/api/llm-status` when deployed) and never reaches the browser. The UI toggle enables itself when a key is detected. The LLM agent reuses the same scenarios, prompt, tools, and evaluator; its structured output is Zod-validated and falls back to the deterministic agent on any error. Never commit `.dev.vars`.
+
+For the public portfolio deployment at `https://wxl3.com/voice`, set Cloudflare runtime variables/secrets:
+
+```txt
+LPL_PUBLIC_DEMO=true
+LPL_LLM_ENABLED=true
+LPL_ALLOWED_ORIGIN=https://wxl3.com
+LPL_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_API_KEY=<Cloudflare secret>
+```
+
+The public demo accepts only trusted prompt presets and scenario-bound request context. It rejects arbitrary browser-supplied system/user prompts, requires the `LPL_RATE_LIMITER` Cloudflare Rate Limiting binding, disables public live-caller/judge endpoints, and keeps deterministic mode available even if LLM mode is unavailable.
 
 For prompt regression checks against a live model, run `npm run eval:llm -- --samples 5`. The runner fails when any rubric falls below the weighted pass-rate threshold (`--threshold`, default `0.8`) or when any model turn falls back to the deterministic script (`--max-fallback-rate`, default `0`).
 

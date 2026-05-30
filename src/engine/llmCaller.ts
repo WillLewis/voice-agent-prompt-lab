@@ -1,5 +1,6 @@
 import type { Caller, CallerBrief, CallerContext, CallerPersona } from "./types";
 import type { ModelCaller } from "./llmAgent";
+import { apiPath } from "../lib/basePath";
 
 // Adaptive LLM "customer" agent (Item 1). Mirrors makeAgentWithCaller in
 // llmAgent.ts — same ModelCaller transport, same fallback pattern. The caller
@@ -87,7 +88,7 @@ export function makeLlmCaller(
  *  uses freeform text output (not structured JSON) so content is used directly. */
 export function makeBrowserLlmCaller(brief: CallerBrief, persona: CallerPersona): Caller {
   return makeLlmCaller(brief, persona, async (system, user) => {
-    const res = await fetch("/api/llm", {
+    const res = await fetch(apiPath("api/llm"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ system, user, freeform: true }),

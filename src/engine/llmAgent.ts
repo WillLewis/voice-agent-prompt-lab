@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { Agent, AgentContext, AgentOutput } from "./types";
 import { deterministicAgent } from "./deterministicAgent";
+import { apiPath } from "../lib/basePath";
+import type { PromptPresetId } from "../prompts/promptPresets";
 
 // LLM-backed agent. Runs in the browser and calls the local /api/llm proxy so
 // the API key stays server-side. The model's structured output is validated with
@@ -76,7 +78,7 @@ const TOOLS_REFERENCE = `Available tools — put EXACTLY these argument shapes i
     — for servicing changes (e.g. adding a vehicle); creates a draft a licensed rep finalizes.
 - escalateToHuman: { "reason": string, "priority": string, "summary": string }`;
 
-function buildUserPrompt(ctx: AgentContext): string {
+export function buildAgentUserPrompt(ctx: AgentContext): string {
   const transcript = ctx.history.map((t) => `${t.speaker}: ${t.text}`).join("\n");
   const facts = [
     `scenario_id: ${ctx.scenario.id}`,
@@ -126,7 +128,7 @@ export type ModelCaller = (system: string, user: string) => Promise<string>;
 export function makeAgentWithCaller(systemPrompt: string, call: ModelCaller): Agent {
   return async (ctx: AgentContext): Promise<AgentOutput> => {
     try {
-      const content = await call(systemPrompt, buildUserPrompt(ctx));
+      const content = await call(systemPrompt, buildAgentUserPrompt(ctx));
       const parsed = content ? parseOutput(content) : null;
       if (parsed) return { ...parsed, source: "llm" };
       throw new Error("LLM returned no valid structured output");
@@ -139,9 +141,58 @@ export function makeAgentWithCaller(systemPrompt: string, call: ModelCaller): Ag
 
 /** Browser agent: calls the local /api/llm proxy so the API key stays
  *  server-side. */
-export function makeLlmAgent(systemPrompt: string): Agent {
+export interface BrowserLlmAgentOptions {
+  publicDemo?: boolean;
+  promptPresetId?: PromptPresetId;
+}
+
+function publicAgentContext(ctx: AgentContext) {
+  return {
+    history: ctx.history.map((turn) => ({
+      speaker: turn.speaker,
+      text: turn.text,
+      state: turn.state,
+      riskFlags: turn.riskFlags,
+    })),
+    collected: ctx.collected,
+    lastCustomer: ctx.lastCustomer,
+    verified: ctx.verified,
+    policyLookedUp: ctx.policyLookedUp,
+    lastToolResult: ctx.lastToolResult,
+  };
+}
+
+export function makeLlmAgent(
+  systemPrompt: string,
+  options: BrowserLlmAgentOptions = {},
+): Agent {
+  if (options.publicDemo) {
+    return async (ctx: AgentContext): Promise<AgentOutput> => {
+      try {
+        const res = await fetch(apiPath("api/llm"), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            kind: "agentTurn",
+            scenarioId: ctx.scenario.id,
+            promptPresetId: options.promptPresetId ?? "robust",
+            context: publicAgentContext(ctx),
+          }),
+        });
+        if (!res.ok) throw new Error(`llm proxy responded ${res.status}`);
+        const data = (await res.json()) as { content?: string };
+        const parsed = data.content ? parseOutput(data.content) : null;
+        if (parsed) return { ...parsed, source: "llm" };
+        throw new Error("LLM returned no valid structured output");
+      } catch {
+        const fallback = await deterministicAgent(ctx);
+        return { ...fallback, source: "fallback" };
+      }
+    };
+  }
+
   return makeAgentWithCaller(systemPrompt, async (system, user) => {
-    const res = await fetch("/api/llm", {
+    const res = await fetch(apiPath("api/llm"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ system, user }),

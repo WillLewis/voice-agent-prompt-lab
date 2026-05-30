@@ -2,11 +2,10 @@
 # key. Deterministic mode is the default and works with NO keys, so this is only
 # needed if you want to run scenarios through a live model.
 #
-# Provide ONE of the following. Anthropic is preferred if both are set.
+# Anthropic is the supported live-model provider for this demo.
 
 ANTHROPIC_API_KEY=
-# OPENAI_API_KEY=
 
 # Optional model override.
-# Defaults: anthropic -> claude-sonnet-4-6, openai -> gpt-4o-mini
-# LPL_MODEL=claude-sonnet-4-6
+# Default: claude-sonnet-4-20250514
+# LPL_MODEL=claude-sonnet-4-20250514

@@ -9,9 +9,21 @@ type Props = {
   onRunAll?: () => void;
   running: boolean;
   runningAll?: boolean;
+  runAllDisabled?: boolean;
+  runAllDisabledReason?: string;
+  notice?: string | null;
 };
 
-export function TranscriptPanel({ view, onRun, onRunAll, running, runningAll = false }: Props) {
+export function TranscriptPanel({
+  view,
+  onRun,
+  onRunAll,
+  running,
+  runningAll = false,
+  runAllDisabled = false,
+  runAllDisabledReason,
+  notice,
+}: Props) {
   const busy = running || runningAll;
 
   return (
@@ -33,6 +45,12 @@ export function TranscriptPanel({ view, onRun, onRunAll, running, runningAll = f
       </header>
 
       <EngineBanner llmRun={view.llmRun} />
+
+      {notice && (
+        <div className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-[11.5px] text-amber-800">
+          {notice}
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto max-w-2xl space-y-4">
@@ -58,7 +76,8 @@ export function TranscriptPanel({ view, onRun, onRunAll, running, runningAll = f
           {onRunAll && (
             <button
               onClick={onRunAll}
-              disabled={busy}
+              disabled={busy || runAllDisabled}
+              title={runAllDisabled ? runAllDisabledReason : undefined}
               className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-100 disabled:opacity-60"
             >
               {runningAll ? (

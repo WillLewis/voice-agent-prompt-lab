@@ -4,6 +4,12 @@ import { SCENARIOS } from "@/data/scenarios";
 import { runLab, runAllDeterministic, runAllLab, type RunLabOptions } from "@/lab/run";
 import { FAILURE_MODE_OPTIONS } from "@/engine/failureAgents";
 import { INSURANCE_VOICE_AGENT_PROMPT } from "@/prompts/insuranceVoiceAgentPrompt";
+import {
+  DEFAULT_PROMPT_PRESET_ID,
+  getPromptPreset,
+  PROMPT_PRESETS,
+  type PromptPresetId,
+} from "@/prompts/promptPresets";
 import type { LabView, ScenarioMeta, CallerMode, CallerPersona, RunAllSummary } from "@/lab/types";
 import type { FailureModeId, RunMode } from "@/engine/types";
 import { ScenarioList } from "@/components/lab/ScenarioList";
@@ -11,6 +17,8 @@ import { TranscriptPanel } from "@/components/lab/TranscriptPanel";
 import { InspectorTabs } from "@/components/lab/InspectorTabs";
 import { NeutralBadge } from "@/components/lab/StatusBadge";
 import { Activity, Loader2, Volume2, VolumeX } from "lucide-react";
+import { apiPath, getViteBasePath, withBasePath } from "@/lib/basePath";
+import { canRunAll, isPublicDemoBuild, PUBLIC_LLM_RUN_LIMIT } from "@/lab/publicDemo";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -29,9 +37,19 @@ function Index() {
   const [activeId, setActiveId] = useState(SCENARIOS[0].id);
   const [mode, setMode] = useState<RunMode>("deterministic");
   const [prompt, setPrompt] = useState(INSURANCE_VOICE_AGENT_PROMPT);
+  const [promptPresetId, setPromptPresetId] =
+    useState<PromptPresetId>(DEFAULT_PROMPT_PRESET_ID);
   const [running, setRunning] = useState(false);
   const [runningAll, setRunningAll] = useState(false);
-  const [llm, setLlm] = useState<{ available: boolean; provider?: string }>({ available: false });
+  const [llm, setLlm] = useState<{
+    available: boolean;
+    provider?: string | null;
+    model?: string | null;
+    publicDemo?: boolean;
+    capabilities?: { agent: boolean; judge: boolean; liveCaller: boolean };
+    reason?: string;
+  }>({ available: false });
+  const [llmLimitNotice, setLlmLimitNotice] = useState<string | null>(null);
   // Item 1: adaptive caller controls
   const [callerMode, setCallerMode] = useState<CallerMode>("scripted");
   const [callerPersona, setCallerPersona] = useState<CallerPersona>("cooperative");
@@ -57,7 +75,7 @@ function Index() {
 
   // Detect whether a server-side API key is configured (enables LLM mode).
   useEffect(() => {
-    fetch("/api/llm-status")
+    fetch(apiPath("api/llm-status"))
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d && typeof d.available === "boolean") setLlm(d);
@@ -80,6 +98,9 @@ function Index() {
   );
 
   const activeView = views[activeId];
+  const publicDemo = isPublicDemoBuild() || llm.publicDemo === true;
+  const runAllAllowed = canRunAll(mode, publicDemo);
+  const faviconHref = withBasePath(getViteBasePath(), "favicon.svg");
 
   // Build the current-scores map for the Versions tab snapshot.
   const currentScores = useMemo(() => {
@@ -87,6 +108,9 @@ function Index() {
   }, [views]);
 
   async function handleRun() {
+    if (publicDemo && mode === "llm" && !reservePublicLlmRun()) {
+      return;
+    }
     setRunning(true);
     try {
       const v = await runLab(activeId, currentRunOptions());
@@ -98,10 +122,23 @@ function Index() {
   }
 
   function currentRunOptions(): RunLabOptions {
-    return { mode, systemPrompt: prompt, callerMode, callerPersona, noiseEnabled, failureMode };
+    return {
+      mode,
+      systemPrompt: prompt,
+      callerMode,
+      callerPersona,
+      noiseEnabled,
+      failureMode,
+      publicDemo,
+      promptPresetId,
+    };
   }
 
   async function handleRunAll() {
+    if (!runAllAllowed) {
+      setLlmLimitNotice("Public LLM mode runs one scenario at a time to control model usage.");
+      return;
+    }
     setRunningAll(true);
     try {
       const before = views;
@@ -120,15 +157,36 @@ function Index() {
     }
   }
 
+  function reservePublicLlmRun(): boolean {
+    const key = "lpl-public-llm-runs";
+    const raw = sessionStorage.getItem(key);
+    const count = Number.parseInt(raw ?? "0", 10) || 0;
+    if (count >= PUBLIC_LLM_RUN_LIMIT) {
+      setLlmLimitNotice(
+        `This browser session has used ${PUBLIC_LLM_RUN_LIMIT} live model runs. Deterministic mode remains available.`,
+      );
+      return false;
+    }
+    sessionStorage.setItem(key, String(count + 1));
+    setLlmLimitNotice(null);
+    return true;
+  }
+
+  function handlePromptPresetChange(nextPresetId: PromptPresetId) {
+    setPromptPresetId(nextPresetId);
+    setPrompt(getPromptPreset(nextPresetId).prompt);
+  }
+
   // Live caller requires LLM mode + key; simulated caller is local and always available.
-  const liveCallerAvailable = mode === "llm" && llm.available;
+  const liveCallerAvailable =
+    mode === "llm" && llm.available && !publicDemo && llm.capabilities?.liveCaller !== false;
   const busy = running || runningAll;
 
   return (
     <div className="flex h-screen flex-col bg-slate-100 text-slate-900">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5">
         <div className="flex items-center gap-3">
-          <img src="/favicon.svg" alt="Insurtech Prompt Lab logo" className="size-7 rounded-md" />
+          <img src={faviconHref} alt="Insurtech Prompt Lab logo" className="size-7 rounded-md" />
           <div>
             <div className="text-sm font-semibold leading-tight text-slate-900">
               Insurtech Prompt Lab
@@ -140,7 +198,12 @@ function Index() {
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           {/* Agent mode toggle */}
-          <ModeToggle mode={mode} onChange={setMode} llmAvailable={llm.available} />
+          <ModeToggle
+            mode={mode}
+            onChange={setMode}
+            llmAvailable={llm.available}
+            unavailableReason={llm.reason}
+          />
           <FailureModeSelect value={failureMode} onChange={setFailureMode} />
           {/* Caller mode toggle (Item 1) */}
           <CallerToggle
@@ -192,6 +255,9 @@ function Index() {
               onRunAll={handleRunAll}
               running={running}
               runningAll={runningAll}
+              runAllDisabled={!runAllAllowed}
+              runAllDisabledReason="Public LLM mode runs one scenario at a time to control model usage."
+              notice={llmLimitNotice}
             />
             <InspectorTabs
               view={activeView}
@@ -199,7 +265,12 @@ function Index() {
               mode={mode}
               edited={prompt !== INSURANCE_VOICE_AGENT_PROMPT}
               onPromptChange={setPrompt}
-              onResetPrompt={() => setPrompt(INSURANCE_VOICE_AGENT_PROMPT)}
+              onResetPrompt={() => handlePromptPresetChange(DEFAULT_PROMPT_PRESET_ID)}
+              publicDemo={publicDemo}
+              promptPresets={PROMPT_PRESETS}
+              selectedPromptPresetId={promptPresetId}
+              onPromptPresetChange={handlePromptPresetChange}
+              judgeAvailable={llm.capabilities?.judge !== false && llm.available && !publicDemo}
               currentScores={currentScores}
               baselineScores={baselineScores}
               baselinePrompt={INSURANCE_VOICE_AGENT_PROMPT}
@@ -325,10 +396,12 @@ function ModeToggle({
   mode,
   onChange,
   llmAvailable,
+  unavailableReason,
 }: {
   mode: RunMode;
   onChange: (m: RunMode) => void;
   llmAvailable: boolean;
+  unavailableReason?: string;
 }) {
   const btn = (m: RunMode, label: string, disabled = false) => (
     <button
@@ -337,7 +410,7 @@ function ModeToggle({
       disabled={disabled}
       title={
         disabled
-          ? "Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .dev.vars to enable LLM mode"
+          ? unavailableReason || "Set ANTHROPIC_API_KEY in .dev.vars to enable LLM mode"
           : undefined
       }
       className={

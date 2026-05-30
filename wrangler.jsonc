@@ -1,7 +1,30 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tanstack-start-app",
+  "name": "voice-agent-prompt-lab",
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
+  "keep_vars": true,
+  "routes": [
+    {
+      "pattern": "wxl3.com/voice*",
+      "zone_name": "wxl3.com"
+    }
+  ],
+  "vars": {
+    "LPL_PUBLIC_DEMO": "true",
+    "LPL_LLM_ENABLED": "true",
+    "LPL_ALLOWED_ORIGIN": "https://wxl3.com",
+    "LPL_MODEL": "claude-sonnet-4-20250514"
+  },
+  "ratelimits": [
+    {
+      "name": "LPL_RATE_LIMITER",
+      "namespace_id": "voice-agent-prompt-lab-public-llm",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
+    }
+  ]
 }

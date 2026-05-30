@@ -2,6 +2,7 @@ import { z } from "zod";
 import { EVALUATOR_PROMPT } from "../prompts/evaluatorPrompt";
 import type { EvalResult, EvalStatus } from "./types";
 import type { LabView } from "../lab/types";
+import { apiPath } from "../lib/basePath";
 
 // LLM-as-judge evaluator (Item 3). Uses the existing EVALUATOR_PROMPT to ask
 // a model to score a transcript on nuance the rule-based checks miss (empathy
@@ -84,7 +85,7 @@ Score the following transcript. Respond with ONLY a single JSON object matching 
 export async function runBrowserJudge(view: LabView): Promise<EvalResult | null> {
   try {
     const user = formatTranscriptForJudge(view);
-    const res = await fetch("/api/llm-judge", {
+    const res = await fetch(apiPath("api/llm-judge"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ system: JUDGE_INSTRUCTION, user }),

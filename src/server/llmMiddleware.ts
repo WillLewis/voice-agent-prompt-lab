@@ -1,14 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
-import { selectProvider, callProvider, callProviderFreeform } from "../engine/llmClient";
+import { handleLlmApi } from "./llmApi";
 import { loadEnvKeys } from "./envKeys";
 
-// Dev-only middleware that exposes /api/llm, /api/llm-judge, and /api/llm-status.
-// The API key is read server-side (from .dev.vars / .env or process.env) and never
-// sent to the browser. LLM mode is optional; with no key the status endpoint
-// reports unavailable and the UI keeps the toggles disabled.
+// Local dev middleware for optional LLM mode. It delegates to the same Fetch
+// handler used by the Cloudflare Worker so production and dev share validation.
 
-function readBody(req: IncomingMessage): Promise<string> {
+async function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolveBody) => {
     let data = "";
     req.on("data", (chunk) => (data += chunk));
@@ -17,60 +15,61 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-function json(res: ServerResponse, status: number, payload: unknown): void {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(payload));
+function headersFromNode(req: IncomingMessage): Headers {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) {
+      for (const item of value) headers.append(key, item);
+    } else if (value !== undefined) {
+      headers.set(key, value);
+    }
+  }
+  return headers;
+}
+
+async function nodeRequest(req: IncomingMessage, path: string): Promise<Request> {
+  const origin = `http://${req.headers.host ?? "localhost"}`;
+  const body = req.method === "GET" || req.method === "HEAD" ? undefined : await readBody(req);
+  return new Request(`${origin}${path}`, {
+    method: req.method ?? "GET",
+    headers: headersFromNode(req),
+    body,
+  });
+}
+
+async function writeResponse(res: ServerResponse, response: Response): Promise<void> {
+  res.statusCode = response.status;
+  response.headers.forEach((value, key) => res.setHeader(key, value));
+  res.end(await response.text());
 }
 
 export function llmProxyPlugin(): Plugin {
   return {
     name: "lpl-llm-proxy",
     configureServer(server) {
-      server.middlewares.use("/api/llm-status", (req, res, next) => {
-        if (req.method !== "GET") return next();
-        const sel = selectProvider(loadEnvKeys(server.config.root));
-        json(res, 200, { available: !!sel, provider: sel?.provider ?? null });
-      });
+      const handle = async (
+        req: IncomingMessage,
+        res: ServerResponse,
+        next: () => void,
+        path: string,
+      ) => {
+        const request = await nodeRequest(req, path);
+        const response = await handleLlmApi(request, loadEnvKeys(server.config.root));
+        if (!response) return next();
+        await writeResponse(res, response);
+      };
 
-      // Main agent endpoint (tool-forced structured output for the agent;
-      // freeform text for the caller when body.freeform === true).
-      server.middlewares.use("/api/llm", async (req, res, next) => {
-        if (req.method !== "POST") return next();
-        try {
-          const sel = selectProvider(loadEnvKeys(server.config.root));
-          if (!sel) return json(res, 503, { error: "No API key configured." });
-          const body = JSON.parse((await readBody(req)) || "{}") as {
-            system?: string;
-            user?: string;
-            freeform?: boolean;
-          };
-          const caller = body.freeform === true ? callProviderFreeform : callProvider;
-          const content = await caller(sel, body.system ?? "", body.user ?? "");
-          json(res, 200, { content });
-        } catch (err) {
-          json(res, 500, { error: err instanceof Error ? err.message : String(err) });
-        }
-      });
-
-      // LLM-judge endpoint (Item 3). Uses freeform text output — the model
-      // returns raw JSON text, not a tool-forced schema. This keeps the judge
-      // schema separate from the agent schema.
-      server.middlewares.use("/api/llm-judge", async (req, res, next) => {
-        if (req.method !== "POST") return next();
-        try {
-          const sel = selectProvider(loadEnvKeys(server.config.root));
-          if (!sel) return json(res, 503, { error: "No API key configured." });
-          const body = JSON.parse((await readBody(req)) || "{}") as {
-            system?: string;
-            user?: string;
-          };
-          const content = await callProviderFreeform(sel, body.system ?? "", body.user ?? "");
-          json(res, 200, { content });
-        } catch (err) {
-          json(res, 500, { error: err instanceof Error ? err.message : String(err) });
-        }
-      });
+      for (const base of ["", "/voice"]) {
+        server.middlewares.use(`${base}/api/llm-status`, (req, res, next) => {
+          void handle(req, res, next, `${base}/api/llm-status`);
+        });
+        server.middlewares.use(`${base}/api/llm`, (req, res, next) => {
+          void handle(req, res, next, `${base}/api/llm`);
+        });
+        server.middlewares.use(`${base}/api/llm-judge`, (req, res, next) => {
+          void handle(req, res, next, `${base}/api/llm-judge`);
+        });
+      }
     },
   };
 }

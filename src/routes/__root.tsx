@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 
 import appCss from "../styles.css?url";
+import { getViteBasePath, withBasePath } from "../lib/basePath";
 
 function NotFoundComponent() {
   return (
@@ -35,6 +36,7 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
+  const homeHref = withBasePath(getViteBasePath(), "");
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -56,7 +58,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
             Try again
           </button>
           <a
-            href="/"
+            href={homeHref}
             className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
           >
             Go home
@@ -72,18 +74,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "LPL" },
-      { name: "description", content: "Insurance voice agent eval harness" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "LPL" },
-      { property: "og:description", content: "Insurance voice agent eval harness" },
+      { title: "Insurtech Prompt Lab" },
+      { name: "description", content: "Insurance voice agent prompt and eval harness" },
+      { name: "author", content: "Will Lewis" },
+      { property: "og:title", content: "Insurtech Prompt Lab" },
+      { property: "og:description", content: "Insurance voice agent prompt and eval harness" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
-      { name: "twitter:title", content: "LPL" },
-      { name: "twitter:description", content: "Insurance voice agent eval harness" },
-      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/94e617b3-d077-48b4-8023-f75d6eb88da9" },
-      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/94e617b3-d077-48b4-8023-f75d6eb88da9" },
+      { name: "twitter:title", content: "Insurtech Prompt Lab" },
+      { name: "twitter:description", content: "Insurance voice agent prompt and eval harness" },
     ],
     links: [
       {
@@ -99,11 +98,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 });
 
 function RootShell({ children }: { children: React.ReactNode }) {
+  const faviconHref = withBasePath(getViteBasePath(), "favicon.svg");
   return (
     <html lang="en">
       <head>
         <HeadContent />
-        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="icon" type="image/svg+xml" href={faviconHref} />
       </head>
       <body>
         {children}
