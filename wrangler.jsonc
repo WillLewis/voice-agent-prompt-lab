@@ -20,7 +20,7 @@
   "ratelimits": [
     {
       "name": "LPL_RATE_LIMITER",
-      "namespace_id": "voice-agent-prompt-lab-public-llm",
+      "namespace_id": "2026053001",
       "simple": {
         "limit": 20,
         "period": 60
