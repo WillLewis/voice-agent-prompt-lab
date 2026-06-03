@@ -18,7 +18,14 @@ import { InspectorTabs } from "@/components/lab/InspectorTabs";
 import { NeutralBadge } from "@/components/lab/StatusBadge";
 import { Activity, Loader2, Volume2, VolumeX } from "lucide-react";
 import { apiPath, getViteBasePath, withBasePath } from "@/lib/basePath";
-import { canRunAll, isPublicDemoBuild, PUBLIC_LLM_RUN_LIMIT } from "@/lab/publicDemo";
+import {
+  canRunAll,
+  isPublicDemoBuild,
+  quotaFromUsage,
+  readPublicLlmUsage,
+  reservePublicLlmRun,
+  writePublicLlmUsage,
+} from "@/lab/publicDemo";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -31,6 +38,10 @@ const PERSONAS: { value: CallerPersona; label: string }[] = [
   { value: "irate", label: "Irate" },
   { value: "evasive-adversarial", label: "Adversarial" },
 ];
+
+function browserSessionStorage(): Storage | null {
+  return typeof window === "undefined" ? null : window.sessionStorage;
+}
 
 function Index() {
   const [views, setViews] = useState<Record<string, LabView>>({});
@@ -58,6 +69,9 @@ function Index() {
   const [failureMode, setFailureMode] = useState<FailureModeId>("none");
   const [runAllSummary, setRunAllSummary] = useState<RunAllSummary | null>(null);
   const [baselineScores, setBaselineScores] = useState<Record<string, string>>({});
+  const [publicLlmUsage, setPublicLlmUsage] = useState(() =>
+    readPublicLlmUsage(browserSessionStorage()),
+  );
 
   // Seed the dashboard: run every scenario deterministically (instant, local).
   useEffect(() => {
@@ -101,24 +115,32 @@ function Index() {
   const publicDemo = isPublicDemoBuild() || llm.publicDemo === true;
   const runAllAllowed = canRunAll(mode, publicDemo);
   const faviconHref = withBasePath(getViteBasePath(), "favicon.svg");
+  const publicLlmQuota = useMemo(() => quotaFromUsage(publicLlmUsage), [publicLlmUsage]);
+  const currentPresetRemaining = publicLlmQuota.remainingByPreset[promptPresetId];
 
   // Build the current-scores map for the Versions tab snapshot.
   const currentScores = useMemo(() => {
     return scoresFromViews(views);
   }, [views]);
 
-  async function handleRun() {
-    if (publicDemo && mode === "llm" && !reservePublicLlmRun()) {
+  async function runActiveScenario(options: RunLabOptions = currentRunOptions()) {
+    const consumesPublicLiveRun =
+      publicDemo && options.mode === "llm" && (options.failureMode ?? failureMode) === "none";
+    if (consumesPublicLiveRun && !reserveLiveRun(options.promptPresetId ?? promptPresetId)) {
       return;
     }
     setRunning(true);
     try {
-      const v = await runLab(activeId, currentRunOptions());
+      const v = await runLab(activeId, options);
       setViews((prev) => ({ ...prev, [activeId]: v }));
       setRunAllSummary(null);
     } finally {
       setRunning(false);
     }
+  }
+
+  async function handleRun() {
+    await runActiveScenario();
   }
 
   function currentRunOptions(): RunLabOptions {
@@ -157,24 +179,39 @@ function Index() {
     }
   }
 
-  function reservePublicLlmRun(): boolean {
-    const key = "lpl-public-llm-runs";
-    const raw = sessionStorage.getItem(key);
-    const count = Number.parseInt(raw ?? "0", 10) || 0;
-    if (count >= PUBLIC_LLM_RUN_LIMIT) {
+  function reserveLiveRun(nextPresetId: PromptPresetId): boolean {
+    const result = reservePublicLlmRun(publicLlmUsage, nextPresetId);
+    setPublicLlmUsage(result.usage);
+    writePublicLlmUsage(browserSessionStorage(), result.usage);
+
+    if (!result.ok) {
+      const preset = getPromptPreset(nextPresetId);
       setLlmLimitNotice(
-        `This browser session has used ${PUBLIC_LLM_RUN_LIMIT} live model runs. Deterministic mode remains available.`,
+        `Prompt ${preset.option} has used its ${result.quota.perPresetLimit} live scenario runs in this browser session. Try another prompt, or use deterministic mode.`,
       );
       return false;
     }
-    sessionStorage.setItem(key, String(count + 1));
+
     setLlmLimitNotice(null);
     return true;
   }
 
-  function handlePromptPresetChange(nextPresetId: PromptPresetId) {
+  async function handlePromptPresetChange(nextPresetId: PromptPresetId) {
+    const nextPrompt = getPromptPreset(nextPresetId).prompt;
     setPromptPresetId(nextPresetId);
-    setPrompt(getPromptPreset(nextPresetId).prompt);
+    setPrompt(nextPrompt);
+
+    if (publicDemo && llm.available && !busy) {
+      setMode("llm");
+      setFailureMode("none");
+      await runActiveScenario({
+        ...currentRunOptions(),
+        mode: "llm",
+        systemPrompt: nextPrompt,
+        failureMode: "none",
+        promptPresetId: nextPresetId,
+      });
+    }
   }
 
   // Live caller requires LLM mode + key; simulated caller is local and always available.
@@ -232,6 +269,11 @@ function Index() {
           <NeutralBadge>
             engine: {failureMode !== "none" ? "failure demo" : mode === "llm" ? llm.provider ?? "llm" : "deterministic"}
           </NeutralBadge>
+          {publicDemo && (
+            <NeutralBadge>
+              live runs: {publicLlmQuota.usedTotal}/{publicLlmQuota.totalLimit}
+            </NeutralBadge>
+          )}
           <span
             className={
               busy
@@ -257,6 +299,13 @@ function Index() {
               runningAll={runningAll}
               runAllDisabled={!runAllAllowed}
               runAllDisabledReason="Public LLM mode runs one scenario at a time to control model usage."
+              runDisabled={
+                publicDemo &&
+                mode === "llm" &&
+                failureMode === "none" &&
+                currentPresetRemaining <= 0
+              }
+              runDisabledReason={`Prompt ${getPromptPreset(promptPresetId).option} has no live scenario runs left in this browser session.`}
               notice={llmLimitNotice}
             />
             <InspectorTabs
@@ -270,6 +319,9 @@ function Index() {
               promptPresets={PROMPT_PRESETS}
               selectedPromptPresetId={promptPresetId}
               onPromptPresetChange={handlePromptPresetChange}
+              publicLlmQuota={publicLlmQuota}
+              llmAvailable={llm.available}
+              promptPresetBusy={busy}
               judgeAvailable={llm.capabilities?.judge !== false && llm.available && !publicDemo}
               currentScores={currentScores}
               baselineScores={baselineScores}

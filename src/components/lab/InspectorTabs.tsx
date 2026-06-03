@@ -12,10 +12,13 @@ import type { RunMode } from "@/engine/types";
 import type { EvalResult } from "@/engine/types";
 import type { PromptPreset, PromptPresetId } from "@/prompts/promptPresets";
 import { EvalBadge, NeutralBadge } from "./StatusBadge";
-import { Wrench, FileText, ClipboardCheck, Network, RotateCcw, Gavel, GitCompare, Save, Trash2, CheckCircle2, XCircle, AlertCircle, Loader2 } from "lucide-react";
+import { Wrench, FileText, ClipboardCheck, Network, RotateCcw, Gavel, GitCompare, Save, Trash2, CheckCircle2, XCircle, AlertCircle, Loader2, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { runBrowserJudge } from "@/engine/llmJudge";
-import { isPromptEditorReadOnly } from "@/lab/publicDemo";
+import {
+  isPromptEditorReadOnly,
+  type PublicLlmQuotaSnapshot,
+} from "@/lab/publicDemo";
 
 type InspectorProps = {
   view: LabView;
@@ -27,7 +30,10 @@ type InspectorProps = {
   publicDemo?: boolean;
   promptPresets?: PromptPreset[];
   selectedPromptPresetId?: PromptPresetId;
-  onPromptPresetChange?: (id: PromptPresetId) => void;
+  onPromptPresetChange?: (id: PromptPresetId) => void | Promise<void>;
+  publicLlmQuota?: PublicLlmQuotaSnapshot;
+  llmAvailable?: boolean;
+  promptPresetBusy?: boolean;
   judgeAvailable?: boolean;
   /** All current scores by scenarioId — used to snapshot per-version scores. */
   currentScores?: Record<string, string>;
@@ -50,6 +56,9 @@ export function InspectorTabs({
   promptPresets = [],
   selectedPromptPresetId,
   onPromptPresetChange,
+  publicLlmQuota,
+  llmAvailable = false,
+  promptPresetBusy = false,
   judgeAvailable = true,
   currentScores,
   baselineScores,
@@ -81,6 +90,9 @@ export function InspectorTabs({
               promptPresets={promptPresets}
               selectedPromptPresetId={selectedPromptPresetId}
               onPromptPresetChange={onPromptPresetChange}
+              publicLlmQuota={publicLlmQuota}
+              llmAvailable={llmAvailable}
+              busy={promptPresetBusy}
             />
           </TabsContent>
           <TabsContent value="tools" className="mt-0">
@@ -150,6 +162,9 @@ function SystemPromptView({
   promptPresets = [],
   selectedPromptPresetId,
   onPromptPresetChange,
+  publicLlmQuota,
+  llmAvailable = false,
+  busy = false,
 }: {
   prompt: string;
   mode: RunMode;
@@ -159,7 +174,10 @@ function SystemPromptView({
   publicDemo?: boolean;
   promptPresets?: PromptPreset[];
   selectedPromptPresetId?: PromptPresetId;
-  onPromptPresetChange?: (id: PromptPresetId) => void;
+  onPromptPresetChange?: (id: PromptPresetId) => void | Promise<void>;
+  publicLlmQuota?: PublicLlmQuotaSnapshot;
+  llmAvailable?: boolean;
+  busy?: boolean;
 }) {
   const tokens = Math.round(prompt.length / 4);
   const readOnly = isPromptEditorReadOnly(publicDemo);
@@ -168,7 +186,7 @@ function SystemPromptView({
       <div className="flex items-center justify-between">
         <SectionTitle>System prompt</SectionTitle>
         <div className="flex items-center gap-1.5">
-          {edited && (
+          {edited && !publicDemo && (
             <button
               onClick={onResetPrompt}
               className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
@@ -181,34 +199,64 @@ function SystemPromptView({
         </div>
       </div>
       {publicDemo && promptPresets.length > 0 && (
-        <div className="grid grid-cols-3 gap-2">
-          {promptPresets.map((preset) => {
-            const active = preset.id === selectedPromptPresetId;
-            return (
-              <button
-                key={preset.id}
-                type="button"
-                onClick={() => onPromptPresetChange?.(preset.id)}
-                className={cn(
-                  "min-h-24 rounded-lg border bg-white p-3 text-left transition",
-                  active
-                    ? "border-slate-900 shadow-sm"
-                    : "border-slate-200 hover:border-slate-400",
-                )}
-              >
-                <span className="inline-flex size-6 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">
-                  {preset.option}
-                </span>
-                <span className="mt-2 block text-[12px] font-semibold text-slate-900">
-                  {preset.label}
-                </span>
-                <span className="mt-1 block text-[11px] leading-snug text-slate-500">
-                  {preset.description}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            {promptPresets.map((preset) => {
+              const active = preset.id === selectedPromptPresetId;
+              const remaining = publicLlmQuota?.remainingByPreset[preset.id];
+              const exhausted = remaining !== undefined && remaining <= 0;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => onPromptPresetChange?.(preset.id)}
+                  disabled={busy}
+                  className={cn(
+                    "min-h-28 rounded-lg border bg-white p-3 text-left transition disabled:opacity-60",
+                    active
+                      ? "border-slate-900 shadow-sm"
+                      : "border-slate-200 hover:border-slate-400",
+                    exhausted && "border-amber-200 bg-amber-50/40",
+                  )}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="inline-flex size-6 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">
+                      {preset.option}
+                    </span>
+                    {llmAvailable && (
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded px-1.5 py-px text-[10px] font-medium ring-1 ring-inset",
+                          exhausted
+                            ? "bg-amber-100 text-amber-800 ring-amber-200"
+                            : "bg-emerald-50 text-emerald-700 ring-emerald-200",
+                        )}
+                      >
+                        <Play className="size-2.5" />
+                        {remaining ?? 0}/{publicLlmQuota?.perPresetLimit ?? 3}
+                      </span>
+                    )}
+                  </span>
+                  <span className="mt-2 block text-[12px] font-semibold text-slate-900">
+                    {preset.label}
+                  </span>
+                  <span className="mt-1 block text-[11px] leading-snug text-slate-500">
+                    {preset.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {llmAvailable && publicLlmQuota && (
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-[11.5px] text-slate-600">
+              Live scenario runs:{" "}
+              <span className="font-medium text-slate-800">
+                {publicLlmQuota.usedTotal}/{publicLlmQuota.totalLimit}
+              </span>{" "}
+              used, capped at {publicLlmQuota.perPresetLimit} each for A, B, and C.
+            </div>
+          )}
+        </>
       )}
       <textarea
         value={prompt}
@@ -223,8 +271,10 @@ function SystemPromptView({
       <p className="rounded-md bg-slate-100 px-3 py-2 text-[11.5px] leading-relaxed text-slate-600">
         {publicDemo ? (
           <>
-            <span className="font-medium text-slate-700">Public demo:</span> choose a prompt block
-            above. Free-text prompt editing stays local-only.
+            <span className="font-medium text-slate-700">Public demo:</span>{" "}
+            {llmAvailable
+              ? "click A, B, or C to run the selected scenario with that prompt."
+              : "choose a prompt block above. Free-text prompt editing stays local-only."}
           </>
         ) : mode === "llm" ? (
           <>
@@ -239,7 +289,9 @@ function SystemPromptView({
             apply changes.
           </>
         )}
-        {edited && <span className="ml-1 font-medium text-amber-700">Edited — re-run to apply.</span>}
+        {edited && !publicDemo && (
+          <span className="ml-1 font-medium text-amber-700">Edited — re-run to apply.</span>
+        )}
       </p>
     </div>
   );

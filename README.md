@@ -85,7 +85,7 @@ Build command: npm run build
 Deploy command: npm run deploy
 ```
 
-The deploy command must target `dist/server/wrangler.json`; that generated config includes the static asset directory (`dist/client`). Deploying with plain `npx wrangler deploy` can publish the Worker code without CSS/JS assets.
+The deploy command must target `dist/server/wrangler.json`; that generated config includes the static asset directory (`dist/client`). Deploying with plain `npx wrangler deploy` can publish the Worker code without CSS/JS assets. The build step also mirrors client assets into `dist/client/voice/*`, because a path-routed Worker at `wxl3.com/voice*` asks Cloudflare's asset layer to resolve `/voice/assets/*` from that subdirectory.
 
 For prompt regression checks against a live model, run `npm run eval:llm -- --samples 5`. The runner fails when any rubric falls below the weighted pass-rate threshold (`--threshold`, default `0.8`) or when any model turn falls back to the deterministic script (`--max-fallback-rate`, default `0`).
 

@@ -11,6 +11,8 @@ type Props = {
   runningAll?: boolean;
   runAllDisabled?: boolean;
   runAllDisabledReason?: string;
+  runDisabled?: boolean;
+  runDisabledReason?: string;
   notice?: string | null;
 };
 
@@ -22,6 +24,8 @@ export function TranscriptPanel({
   runningAll = false,
   runAllDisabled = false,
   runAllDisabledReason,
+  runDisabled = false,
+  runDisabledReason,
   notice,
 }: Props) {
   const busy = running || runningAll;
@@ -90,7 +94,8 @@ export function TranscriptPanel({
           )}
           <button
             onClick={onRun}
-            disabled={busy}
+            disabled={busy || runDisabled}
+            title={runDisabled ? runDisabledReason : undefined}
             className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1 text-xs font-medium text-white shadow-sm transition-colors hover:bg-slate-800 disabled:opacity-60"
           >
             {running ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
