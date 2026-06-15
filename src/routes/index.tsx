@@ -221,16 +221,18 @@ function Index() {
     setPromptPresetId(nextPresetId);
     setPrompt(nextPrompt);
 
-    if (publicDemo && llm.available && !busy) {
+    if (publicDemo && llm.available) {
+      const nextQuota = quotaFromUsage(publicLlmUsage);
+      const selectedPreset = getPromptPreset(nextPresetId);
       setMode("llm");
       setFailureMode("none");
-      await runActiveScenario({
-        ...currentRunOptions(),
-        mode: "llm",
-        systemPrompt: nextPrompt,
-        failureMode: "none",
-        promptPresetId: nextPresetId,
-      });
+      setLlmLimitNotice(
+        nextQuota.remainingByPreset[nextPresetId] <= 0
+          ? `Prompt ${selectedPreset.option} has used its ${nextQuota.perPresetLimit} live scenario runs in this browser session. Try another prompt, or use deterministic mode.`
+          : null,
+      );
+    } else {
+      setLlmLimitNotice(null);
     }
   }
 

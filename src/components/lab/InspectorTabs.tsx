@@ -203,8 +203,10 @@ function SystemPromptView({
           <div className="grid grid-cols-3 gap-2">
             {promptPresets.map((preset) => {
               const active = preset.id === selectedPromptPresetId;
+              const used = publicLlmQuota?.usedByPreset[preset.id] ?? 0;
+              const limit = publicLlmQuota?.perPresetLimit ?? 3;
               const remaining = publicLlmQuota?.remainingByPreset[preset.id];
-              const exhausted = remaining !== undefined && remaining <= 0;
+              const exhausted = used >= limit || (remaining !== undefined && remaining <= 0);
               return (
                 <button
                   key={preset.id}
@@ -233,7 +235,7 @@ function SystemPromptView({
                         )}
                       >
                         <Play className="size-2.5" />
-                        {remaining ?? 0}/{publicLlmQuota?.perPresetLimit ?? 3}
+                        {used}/{limit} used
                       </span>
                     )}
                   </span>
@@ -273,7 +275,7 @@ function SystemPromptView({
           <>
             <span className="font-medium text-slate-700">Public demo:</span>{" "}
             {llmAvailable
-              ? "click A, B, or C to run the selected scenario with that prompt."
+              ? "choose A, B, or C, then click Run scenario to run the selected scenario with that prompt."
               : "choose a prompt block above. Free-text prompt editing stays local-only."}
           </>
         ) : mode === "llm" ? (
