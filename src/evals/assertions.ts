@@ -367,7 +367,10 @@ export function licensedReviewLanguage(
   }
   const text = agentTexts(turns).join(" ").toLowerCase();
   const mentionsLicensed = /\blicensed\b/.test(text);
-  const mentionsReview = /\b(review|finali[sz]e|finalization|premium impact)\b/.test(text);
+  const mentionsReview =
+    /\breview(?:s|ed|ing)?\b/.test(text) ||
+    /\bfinali[sz](?:e|es|ed|ing|ation)\b/.test(text) ||
+    /\bpremium (?:or coverage )?impacts?\b/.test(text);
   if (mentionsLicensed && mentionsReview) {
     return pass("Explained licensed review/finalization for the policy change.");
   }

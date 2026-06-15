@@ -179,6 +179,26 @@ function Index() {
     }
   }
 
+  async function handleReset() {
+    setRunningAll(true);
+    try {
+      const next = await runAllDeterministic();
+      setViews(next);
+      setBaselineScores(scoresFromViews(next));
+      setMode("deterministic");
+      setPromptPresetId(DEFAULT_PROMPT_PRESET_ID);
+      setPrompt(INSURANCE_VOICE_AGENT_PROMPT);
+      setFailureMode("none");
+      setCallerMode("scripted");
+      setCallerPersona("cooperative");
+      setNoiseEnabled(false);
+      setRunAllSummary(null);
+      setLlmLimitNotice(null);
+    } finally {
+      setRunningAll(false);
+    }
+  }
+
   function reserveLiveRun(nextPresetId: PromptPresetId): boolean {
     const result = reservePublicLlmRun(publicLlmUsage, nextPresetId);
     setPublicLlmUsage(result.usage);
@@ -295,6 +315,7 @@ function Index() {
               view={activeView}
               onRun={handleRun}
               onRunAll={handleRunAll}
+              onReset={handleReset}
               running={running}
               runningAll={runningAll}
               runAllDisabled={!runAllAllowed}

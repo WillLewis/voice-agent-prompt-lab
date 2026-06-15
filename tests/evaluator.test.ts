@@ -191,6 +191,20 @@ describe("evaluator — catches violations", () => {
     expect(statusOf("add-vehicle", trace, RUBRIC.LICENSED_REVIEW_LANGUAGE.id)).toBe("fail");
   });
 
+  it("accepts natural licensed-review/finalization wording on a servicing change", () => {
+    const trace = makeTrace(
+      [
+        {
+          text:
+            "The draft has been created. Please note that this is a draft change that will need to be reviewed and finalized by one of our licensed representatives to determine any premium or coverage impacts.",
+          state: "resolved",
+        },
+      ],
+      [],
+    );
+    expect(statusOf("add-vehicle", trace, RUBRIC.LICENSED_REVIEW_LANGUAGE.id)).toBe("pass");
+  });
+
   it("recognizes natural empathy phrasing the literal keyword list missed", () => {
     // "I completely understand" must count as empathy; the old substring list
     // required the exact bigram "i understand" and false-warned on this.

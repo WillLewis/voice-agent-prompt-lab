@@ -7,6 +7,7 @@ type Props = {
   view: LabView;
   onRun: () => void;
   onRunAll?: () => void;
+  onReset?: () => void;
   running: boolean;
   runningAll?: boolean;
   runAllDisabled?: boolean;
@@ -20,6 +21,7 @@ export function TranscriptPanel({
   view,
   onRun,
   onRunAll,
+  onReset,
   running,
   runningAll = false,
   runAllDisabled = false,
@@ -102,8 +104,10 @@ export function TranscriptPanel({
             {running ? "Running…" : "Run scenario"}
           </button>
           <button
-            disabled
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-500 shadow-sm opacity-60"
+            onClick={onReset}
+            disabled={busy || !onReset}
+            title="Reset all scenarios to the robust deterministic baseline"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-100 disabled:opacity-60"
           >
             <RotateCcw className="size-3.5" />
             Reset
